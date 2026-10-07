@@ -1,0 +1,19 @@
+{
+  "URLBlocklist": ["*"],
+  "URLAllowlist": [
+    "http://127.0.0.1:8765",
+    "http://127.0.0.1:8765/*",
+    "https://www.youtube-nocookie.com",
+    "https://www.youtube-nocookie.com/*",
+    "https://www.youtube.com",
+    "https://www.youtube.com/*",
+    "https://i.ytimg.com",
+    "https://i.ytimg.com/*",
+    "https://s.ytimg.com",
+    "https://s.ytimg.com/*"
+  ],
+  "DeveloperToolsAvailability": 2,
+  "IncognitoModeAvailability": 1,
+  "DownloadRestrictions": 3,
+  "PrintingEnabled": false
+}
