@@ -22,9 +22,7 @@ def _host(tmp_path: Path) -> Host:
     migrate(engine)
     store = Store(session_factory(engine))
     store.upsert_learner(learner_id="kid", first_name="Sam", birth_year=2020)
-    store.replace_skills(
-        [Skill(id="math.counting.to20", title="Count to 20", kid_description="Count")]
-    )
+    store.replace_skills([Skill(id="math.counting.to20", title="Count to 20", kid_description="Count")])
     runtime = Runtime(
         store=store,
         llm=FakeLLM(

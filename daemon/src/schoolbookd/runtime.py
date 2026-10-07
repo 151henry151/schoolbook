@@ -54,8 +54,7 @@ class Runtime:
             blocked_videos=self.store.blocked_ids(),
             enabled_apps=enabled,
             app_activities={
-                app_id: {item.id for item in manifest.activities}
-                for app_id, manifest in self.apps.items()
+                app_id: {item.id for item in manifest.activities} for app_id, manifest in self.apps.items()
             },
             playing_video=live.playing_video,
         )

@@ -73,9 +73,7 @@ class TutorLoop:
             rounds += 1
             if self.clock() - started > self.wall_clock_s:
                 break
-            response = self.llm.complete(
-                LLMRequest(model=self.model, system=system, messages=messages)
-            )
+            response = self.llm.complete(LLMRequest(model=self.model, system=system, messages=messages))
             if response.tool_calls:
                 messages.append(
                     {
@@ -109,9 +107,7 @@ class TutorLoop:
         return TurnOutcome(sentences, records, flagged, flag_reason, ended, redirected)
 
     def _speak(self, text: str) -> tuple[list[str], bool]:
-        sentences = chunk_sentences(
-            text, max_sentences=self.max_sentences, max_words=self.max_words
-        )
+        sentences = chunk_sentences(text, max_sentences=self.max_sentences, max_words=self.max_words)
         redirected = False
         checked: list[str] = []
         for sentence in sentences:

@@ -27,3 +27,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Anthropic, Piper, whisper.cpp, and YouTube Data API clients behind the provider interfaces
 - Age-6 kid-speak scorer for sentence count, one question, and no markdown
 - Core charter, age-6 and age-9 profiles, the starter skills tree, and seed app manifests
+- Install script, systemd unit, greetd, Chromium policy, polkit, logind, and sysctl lockdown files
+- Daemon bootstrap, static file serving, config self-test, and a localhost token for the child UI
+- Child UI with a home avatar, board, talk button, and developer text box

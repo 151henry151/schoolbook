@@ -364,12 +364,8 @@ class Store:
             notes = list(
                 db.scalars(select(Note).where(Note.learner_id == learner_id).order_by(Note.created_at))
             )
-            interests = list(
-                db.scalars(select(Interest).where(Interest.learner_id == learner_id))
-            )
-            states = list(
-                db.scalars(select(SkillState).where(SkillState.learner_id == learner_id))
-            )
+            interests = list(db.scalars(select(Interest).where(Interest.learner_id == learner_id)))
+            states = list(db.scalars(select(SkillState).where(SkillState.learner_id == learner_id)))
             sessions = list(
                 db.scalars(
                     select(SessionRow)
@@ -573,9 +569,7 @@ class Store:
 
     def delete_learner_data(self, learner_id: str) -> None:
         with self.session() as db:
-            sessions = list(
-                db.scalars(select(SessionRow).where(SessionRow.learner_id == learner_id))
-            )
+            sessions = list(db.scalars(select(SessionRow).where(SessionRow.learner_id == learner_id)))
             for session_row in sessions:
                 turns = list(db.scalars(select(Turn).where(Turn.session_id == session_row.id)))
                 for turn in turns:

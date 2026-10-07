@@ -1,0 +1,109 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# SPDX-FileCopyrightText: 2026 Schoolbook contributors
+
+"""Build a runtime from on-disk config, prompts, skills, and apps."""
+
+from __future__ import annotations
+
+import contextlib
+import secrets as secrets_mod
+from pathlib import Path
+
+import yaml
+from sqlalchemy import select
+
+from schoolbookd.api import Host
+from schoolbookd.config import SchoolbookConfig, Secrets
+from schoolbookd.content.apps import load_manifests
+from schoolbookd.content.skills import load_skill_rows
+from schoolbookd.db.engine import backup_database, make_engine, migrate, session_factory
+from schoolbookd.db.models import Learner
+from schoolbookd.db.store import Store
+from schoolbookd.policy.output_check import OutputCheck
+from schoolbookd.providers.base import FakeLLM, FakeSTT, FakeTTS, LLMProvider, STTProvider, TTSProvider
+from schoolbookd.runtime import Runtime
+from schoolbookd.tutor.prompts import load_age_profile
+
+
+def build_host(config: SchoolbookConfig, secrets: Secrets) -> Host:
+    backup_database(config.database_path, config.backups_dir)
+    engine = make_engine(config.database_path)
+    migrate(engine)
+    store = Store(session_factory(engine))
+    store.replace_skills(load_skill_rows(config.skills_file))
+    _ensure_learner(store, config.etc_dir / "learner.yaml")
+    learner_id = _first_learner_id(store)
+    apps = load_manifests(config.apps_dir)
+    profile = load_age_profile(config.profiles_dir / "age-6.yaml")
+    token = secrets_mod.token_urlsafe(32)
+    config.data_dir.mkdir(parents=True, exist_ok=True)
+    config.token_file.write_text(token + "\n", encoding="utf-8")
+    with contextlib.suppress(OSError):
+        config.token_file.chmod(0o640)
+    runtime = Runtime(
+        store=store,
+        llm=_llm(config, secrets),
+        tts=_tts(config),
+        output_check=OutputCheck.load(config.output_check_file),
+        apps=apps,
+        age_profile=profile,
+        core_prompt=config.core_prompt.read_text(encoding="utf-8"),
+        model=config.model if config.providers.llm == "anthropic" else "fake",
+        summary=_llm(config, secrets),
+    )
+    return Host(
+        runtime=runtime,
+        learner_id=learner_id,
+        token=token,
+        password_hash=secrets.parent_password_hash,
+        session_secret=secrets.console_session_secret or secrets_mod.token_urlsafe(32),
+        dev_text=config.dev_text_input,
+        lan_enabled=config.lan.enabled,
+    )
+
+
+def _ensure_learner(store: Store, path: Path) -> None:
+    if not path.is_file():
+        return
+    raw = yaml.safe_load(path.read_text(encoding="utf-8"))
+    store.upsert_learner(
+        learner_id=str(raw["id"]),
+        first_name=str(raw["first_name"]),
+        birth_year=int(raw["birth_year"]),
+        age_profile=str(raw.get("age_profile", "age-6")),
+        avatar=str(raw.get("avatar", "star")),
+        voice=str(raw.get("voice", "piper-warm")),
+        talk_mode=str(raw.get("talk_mode", "tap")),
+    )
+
+
+def _first_learner_id(store: Store) -> str:
+    with store.session() as db:
+        learner = db.scalars(select(Learner)).first()
+    if learner is None:
+        raise RuntimeError("no learner configured; add etc/learner.yaml")
+    return str(learner.id)
+
+
+def _llm(config: SchoolbookConfig, secrets: Secrets) -> LLMProvider:
+    if config.providers.llm == "anthropic":
+        from schoolbookd.providers.anthropic import AnthropicLLM
+
+        return AnthropicLLM(secrets.anthropic_api_key, config.model)
+    return FakeLLM([])
+
+
+def _tts(config: SchoolbookConfig) -> TTSProvider:
+    if config.providers.tts == "piper":
+        from schoolbookd.providers.piper import PiperTTS
+
+        return PiperTTS()
+    return FakeTTS()
+
+
+def make_stt(config: SchoolbookConfig) -> STTProvider:
+    if config.providers.stt == "whisper":
+        from schoolbookd.providers.whisper import WhisperSTT
+
+        return WhisperSTT()
+    return FakeSTT([])

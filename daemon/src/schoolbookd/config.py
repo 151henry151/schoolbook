@@ -149,9 +149,7 @@ def load_config(path: Path) -> SchoolbookConfig:
     try:
         return SchoolbookConfig.model_validate(raw)
     except ValidationError as exc:
-        errors = [
-            f"{'.'.join(str(part) for part in err['loc'])}: {err['msg']}" for err in exc.errors()
-        ]
+        errors = [f"{'.'.join(str(part) for part in err['loc'])}: {err['msg']}" for err in exc.errors()]
         raise ConfigError(errors) from exc
 
 
@@ -171,9 +169,7 @@ def check_config(config: SchoolbookConfig) -> list[str]:
     """Return human-readable problems. Empty means the daemon may start."""
     errors: list[str] = []
     if config.protocol_major != MAJOR:
-        errors.append(
-            f"protocol_major {config.protocol_major} is incompatible with package major {MAJOR}"
-        )
+        errors.append(f"protocol_major {config.protocol_major} is incompatible with package major {MAJOR}")
     required = [
         config.core_prompt,
         config.skills_file,

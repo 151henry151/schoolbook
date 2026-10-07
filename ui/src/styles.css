@@ -1,0 +1,11 @@
+:root {
+  font-family: "Segoe UI", sans-serif;
+  color: #1c1915;
+  background: #f6efe2;
+}
+body { margin: 0; }
+button { min-height: 64px; min-width: 64px; font-size: 1.4rem; }
+.home, .talk { min-height: 100vh; display: grid; place-items: center; gap: 1rem; }
+.avatar, .talk-button { width: 12rem; height: 12rem; border-radius: 999px; border: 0; background: #e07a3d; color: white; }
+.big-text, .equation, .dots { font-size: 4rem; margin: 0; }
+.transcript { font-size: 2rem; }

@@ -116,6 +116,10 @@ def child_app(host: Host) -> FastAPI:
     def health() -> dict[str, str]:
         return {"status": "ok"}
 
+    @app.get("/token")
+    def token() -> dict[str, str]:
+        return {"token": host.token, "protocol_major": str(MAJOR)}
+
     @app.post("/dev/turn")
     def dev_turn(body: dict[str, str], request: Request) -> JSONResponse:
         if not host.dev_text:
@@ -235,9 +239,7 @@ def console_app(host: Host) -> FastAPI:
     def progress() -> dict[str, object]:
         with host.runtime.store.session() as db:
             skills = list(db.scalars(select(Skill)))
-            states = list(
-                db.scalars(select(SkillState).where(SkillState.learner_id == host.learner_id))
-            )
+            states = list(db.scalars(select(SkillState).where(SkillState.learner_id == host.learner_id)))
         by_id = {row.skill_id: row.state for row in states}
         return {
             "skills": [
@@ -250,9 +252,7 @@ def console_app(host: Host) -> FastAPI:
     def memory() -> dict[str, object]:
         with host.runtime.store.session() as db:
             notes = list(db.scalars(select(Note).where(Note.learner_id == host.learner_id)))
-            interests = list(
-                db.scalars(select(Interest).where(Interest.learner_id == host.learner_id))
-            )
+            interests = list(db.scalars(select(Interest).where(Interest.learner_id == host.learner_id)))
             observations = list(
                 db.scalars(select(Observation).where(Observation.learner_id == host.learner_id))
             )

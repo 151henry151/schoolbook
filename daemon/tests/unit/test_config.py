@@ -51,9 +51,7 @@ def test_check_config_rejects_unknown_field(tmp_path: Path) -> None:
     assert main(["--config", str(config), "--check-config"]) == 1
 
 
-def test_check_config_names_missing_prompt(
-    tmp_path: Path, capsys: pytest.CaptureFixture[str]
-) -> None:
+def test_check_config_names_missing_prompt(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
     config_path = _write_tree(tmp_path)
     loaded = load_config(config_path)
     loaded.core_prompt.unlink()

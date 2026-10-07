@@ -75,11 +75,7 @@ class ToolPolicy:
         for element in board.elements:
             if element.type == "image" and element.image_id not in ctx.image_ids:
                 return Decision(False, "image is not in the local library")
-            if (
-                isinstance(element, Objects)
-                and element.image_id
-                and element.image_id not in ctx.image_ids
-            ):
+            if isinstance(element, Objects) and element.image_id and element.image_id not in ctx.image_ids:
                 return Decision(False, "image is not in the local library")
         return Decision(True, "ok")
 

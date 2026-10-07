@@ -123,13 +123,9 @@ def test_unlock_locks_after_five_failures() -> None:
     ok, state = attempt_unlock("nope", password_hash, state, now)
     assert not ok
     assert state.locked_until == now + timedelta(seconds=300)
-    still, state = attempt_unlock(
-        "correct horse", password_hash, state, now + timedelta(seconds=10)
-    )
+    still, state = attempt_unlock("correct horse", password_hash, state, now + timedelta(seconds=10))
     assert not still
-    opened, state = attempt_unlock(
-        "correct horse", password_hash, state, now + timedelta(seconds=301)
-    )
+    opened, state = attempt_unlock("correct horse", password_hash, state, now + timedelta(seconds=301))
     assert opened
     assert state.failures == 0
 

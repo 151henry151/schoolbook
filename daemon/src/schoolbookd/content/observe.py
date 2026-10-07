@@ -56,8 +56,7 @@ class ScreenObserver:
         digest = average_hash(gray, width, height)
         self.last_sample_at = now
         unchanged = (
-            self.last_hash is not None
-            and hash_distance(digest, self.last_hash) <= self.change_threshold
+            self.last_hash is not None and hash_distance(digest, self.last_hash) <= self.change_threshold
         )
         if unchanged:
             return False
