@@ -1,0 +1,19 @@
+id: age-6
+max_sentences_per_turn: 3
+max_words_per_sentence: 12
+target_reading_grade: 1
+talk_mode_default: tap
+break_suggestions: gentle
+video_duration_minutes: [1, 30]
+video_stretch_steps: 1
+watch_along_pause_min_seconds: 120
+observer_frame_interval_s: 3
+language: en
+subject_weights:
+  reading: 3
+  math: 3
+  science: 2
+  world: 2
+  arts: 1
+  cs: 1
+  philosophy: 1

@@ -1,0 +1,19 @@
+id: age-9
+max_sentences_per_turn: 4
+max_words_per_sentence: 18
+target_reading_grade: 3
+talk_mode_default: tap
+break_suggestions: gentle
+video_duration_minutes: [1, 30]
+video_stretch_steps: 1
+watch_along_pause_min_seconds: 90
+observer_frame_interval_s: 3
+language: en
+subject_weights:
+  reading: 2
+  math: 3
+  science: 3
+  world: 2
+  arts: 1
+  cs: 2
+  philosophy: 2

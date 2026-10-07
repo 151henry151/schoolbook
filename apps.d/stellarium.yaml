@@ -1,0 +1,5 @@
+id: stellarium
+name: Stellarium
+exec: [stellarium, --full-screen]
+observe: true
+activities: []

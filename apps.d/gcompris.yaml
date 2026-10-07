@@ -1,0 +1,15 @@
+id: gcompris
+name: GCompris
+exec: [gcompris-qt, --enable-kioskmode, -f]
+activity_arg: ["--launch", "{activity}"]
+level_arg: ["--start-level", "{level}"]
+observe: true
+activities:
+  - id: enumerate
+    title: Count the items
+    skills: [math.counting.to20]
+    ages: [4, 7]
+  - id: algebra_by
+    title: Multiplication practice
+    skills: [math.addition.within10]
+    ages: [7, 10]
