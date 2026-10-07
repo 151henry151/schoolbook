@@ -19,3 +19,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Tool policy, parent unlock lockout, and local output check
 - Learner-state rules, interest decay, stretch levels, and profile assembly
 - YouTube hard filters, vetting stages, app argv builder, and screen-observer hashing
+- Tutor loop with fake providers, sentence limits, output checks, and distress flags
+- Database store for sessions, skills, interests, notes, videos, and forget
+- Runtime that logs a scripted child turn and builds app argv from manifests

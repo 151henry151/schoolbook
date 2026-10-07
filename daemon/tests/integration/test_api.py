@@ -1,0 +1,117 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# SPDX-FileCopyrightText: 2026 Schoolbook contributors
+
+from pathlib import Path
+
+from fastapi.testclient import TestClient
+
+from schoolbookd.api import Host, child_app, console_app
+from schoolbookd.content.apps import Activity, AppManifest
+from schoolbookd.db.engine import make_engine, migrate, session_factory
+from schoolbookd.db.models import Skill
+from schoolbookd.db.store import Store
+from schoolbookd.policy.output_check import OutputCheck
+from schoolbookd.policy.unlock import hash_password
+from schoolbookd.providers.base import FakeLLM, FakeTTS, LLMResponse, ToolUse
+from schoolbookd.runtime import Runtime
+from schoolbookd.tutor.prompts import AgeProfile
+
+
+def _host(tmp_path: Path) -> Host:
+    engine = make_engine(tmp_path / "schoolbook.db")
+    migrate(engine)
+    store = Store(session_factory(engine))
+    store.upsert_learner(learner_id="kid", first_name="Sam", birth_year=2020)
+    store.replace_skills(
+        [Skill(id="math.counting.to20", title="Count to 20", kid_description="Count")]
+    )
+    runtime = Runtime(
+        store=store,
+        llm=FakeLLM(
+            [
+                LLMResponse(
+                    text="Sharks are fish. Want to count?",
+                    tool_calls=[
+                        ToolUse(
+                            "show_board",
+                            {"elements": [{"type": "big_text", "text": "shark", "highlights": []}]},
+                        )
+                    ],
+                )
+            ]
+        ),
+        tts=FakeTTS(),
+        output_check=OutputCheck([]),
+        apps={
+            "gcompris": AppManifest(
+                id="gcompris",
+                name="GCompris",
+                exec=["gcompris-qt"],
+                activities=[Activity(id="enumerate", title="Count")],
+            )
+        },
+        age_profile=AgeProfile(id="age-6"),
+        core_prompt="computer helper",
+        summary=FakeLLM([LLMResponse(text="Talked about sharks.")]),
+    )
+    return Host(
+        runtime=runtime,
+        learner_id="kid",
+        token="boot-token",
+        password_hash=hash_password("parent-secret"),
+        session_secret="cookie-secret",
+        dev_text=True,
+    )
+
+
+def test_dev_turn_and_console_lockout(tmp_path: Path) -> None:
+    host = _host(tmp_path)
+    child = TestClient(child_app(host))
+    denied = child.post("/dev/turn", json={"text": "hi"})
+    assert denied.status_code == 401
+    ok = child.post(
+        "/dev/turn",
+        json={"text": "Tell me about sharks"},
+        headers={"x-schoolbook-token": "boot-token"},
+    )
+    assert ok.status_code == 200
+    assert "Sharks" in ok.json()["sentences"][0]
+    assert ok.json()["tools"] == ["show_board"]
+
+    console = TestClient(console_app(host))
+    assert console.get("/api/today").status_code == 401
+    for _ in range(5):
+        assert console.post("/api/login", json={"password": "nope"}).status_code == 401
+    locked = console.post("/api/login", json={"password": "parent-secret"})
+    assert locked.status_code == 401
+    assert locked.json()["error"] == "locked"
+
+
+def test_parent_login_lists_the_session(tmp_path: Path) -> None:
+    host = _host(tmp_path)
+    child = TestClient(child_app(host))
+    child.post(
+        "/dev/turn",
+        json={"text": "sharks"},
+        headers={"x-schoolbook-token": "boot-token"},
+    )
+    console = TestClient(console_app(host))
+    logged_in = console.post("/api/login", json={"password": "parent-secret"})
+    assert logged_in.status_code == 200
+    today = console.get("/api/today")
+    assert today.json()["in_session"] is True
+    progress = console.get("/api/progress")
+    assert progress.json()["skills"][0]["id"] == "math.counting.to20"
+    console.post("/api/library/channels/bad-channel/block")
+    assert "bad-channel" in host.runtime.store.blocked_channels()
+    exported = console.get("/api/export")
+    assert "Sam" in exported.json()["markdown"]
+
+
+def test_websocket_rejects_the_wrong_protocol_major(tmp_path: Path) -> None:
+    host = _host(tmp_path)
+    client = TestClient(child_app(host))
+    with client.websocket_connect("/ws") as socket:
+        socket.send_json({"type": "hello", "protocol_major": 99, "token": "boot-token"})
+        message = socket.receive_json()
+        assert message["type"] == "error"
