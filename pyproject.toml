@@ -1,6 +1,6 @@
 [project]
 name = "schoolbook"
-version = "0.0.0"
+version = "0.9.0"
 description = "Locked-down Linux learning environment with a spoken AI tutor"
 readme = "README.md"
 requires-python = ">=3.12"
