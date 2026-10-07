@@ -1,0 +1,55 @@
+[project]
+name = "schoolbook"
+version = "0.0.0"
+description = "Locked-down Linux learning environment with a spoken AI tutor"
+readme = "README.md"
+requires-python = ">=3.12"
+license = "GPL-3.0-or-later"
+dependencies = [
+  "schoolbook-protocol",
+  "schoolbookd",
+  "schoolbook-session",
+]
+
+[tool.uv.workspace]
+members = ["protocol", "daemon", "session"]
+
+[tool.uv.sources]
+schoolbook-protocol = { workspace = true }
+schoolbookd = { workspace = true }
+schoolbook-session = { workspace = true }
+
+[dependency-groups]
+dev = [
+  "pytest>=8.3",
+  "pytest-cov>=6.0",
+  "ruff>=0.8",
+  "mypy>=1.13",
+  "reuse>=5.0",
+]
+
+[tool.ruff]
+target-version = "py312"
+line-length = 100
+src = ["protocol/src", "daemon/src", "session/src", "protocol/tests", "daemon/tests", "session/tests"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM"]
+
+[tool.mypy]
+strict = true
+python_version = "3.12"
+packages = ["schoolbook_protocol", "schoolbookd", "schoolbook_session"]
+mypy_path = ["protocol/src", "daemon/src", "session/src"]
+namespace_packages = false
+
+[tool.pytest.ini_options]
+testpaths = ["protocol/tests", "daemon/tests", "session/tests"]
+addopts = "-q --cov=schoolbook_protocol --cov=schoolbookd --cov=schoolbook_session --cov-report=term-missing"
+
+[tool.coverage.run]
+branch = true
+source = ["protocol/src", "daemon/src", "session/src"]
+
+[tool.uv]
+package = false

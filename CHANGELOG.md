@@ -11,3 +11,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - README describing the planned application
 - Design and implementation specification
+- GPL-3.0-or-later license and REUSE metadata
+- uv workspace for the protocol, daemon, and session packages
+- Shared protocol models for board elements, the child WebSocket, and the session socket

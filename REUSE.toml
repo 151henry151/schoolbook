@@ -1,0 +1,33 @@
+version = 1
+SPDX-PackageName = "schoolbook"
+SPDX-PackageSupplier = "Schoolbook contributors"
+SPDX-PackageDownloadLocation = "https://github.com/151henry151/schoolbook"
+
+[[annotations]]
+path = [
+  "LICENSE",
+  "VERSION",
+  "CHANGELOG.md",
+  "README.md",
+  ".gitignore",
+  "REUSE.toml",
+  "docs/**",
+  "prompts/**",
+  "profiles/**",
+  "skills/**",
+  "apps.d/**",
+  "packaging/**",
+  "**/*.yaml",
+  "**/*.yml",
+  "**/*.json",
+  "**/*.md",
+  "**/*.html",
+  "**/*.css",
+  "**/*.svg",
+  "**/*.lock",
+  "uv.lock",
+  "**/package-lock.json",
+]
+precedence = "aggregate"
+SPDX-FileCopyrightText = "2026 Schoolbook contributors"
+SPDX-License-Identifier = "GPL-3.0-or-later"
