@@ -30,7 +30,7 @@ dev = [
 
 [tool.ruff]
 target-version = "py312"
-line-length = 100
+line-length = 110
 src = ["protocol/src", "daemon/src", "session/src", "protocol/tests", "daemon/tests", "session/tests"]
 
 [tool.ruff.lint]
