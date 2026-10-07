@@ -43,6 +43,10 @@ packages = ["schoolbook_protocol", "schoolbookd", "schoolbook_session"]
 mypy_path = ["protocol/src", "daemon/src", "session/src"]
 namespace_packages = false
 
+[[tool.mypy.overrides]]
+module = ["yaml", "yaml.*"]
+ignore_missing_imports = true
+
 [tool.pytest.ini_options]
 testpaths = ["protocol/tests", "daemon/tests", "session/tests"]
 addopts = "-q --cov=schoolbook_protocol --cov=schoolbookd --cov=schoolbook_session --cov-report=term-missing"
