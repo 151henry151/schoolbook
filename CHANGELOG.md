@@ -24,3 +24,5 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Runtime that logs a scripted child turn and builds app argv from manifests
 - Child WebSocket and parent console HTTP API with login lockout and channel blocks
 - Session agent that launches only allowlisted argv and keeps Chromium on localhost
+- Anthropic, Piper, whisper.cpp, and YouTube Data API clients behind the provider interfaces
+- Age-6 kid-speak scorer for sentence count, one question, and no markdown
