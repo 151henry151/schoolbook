@@ -30,3 +30,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Install script, systemd unit, greetd, Chromium policy, polkit, logind, and sysctl lockdown files
 - Daemon bootstrap, static file serving, config self-test, and a localhost token for the child UI
 - Child UI with a home avatar, board, talk button, and developer text box
+- YouTube search cache and vetting that drop blocked channels before the tutor sees them
+- Tap-to-talk transcription, sentence audio, write-only settings, image upload, and app time caps
+- Optional ntfy alerts, restic backup commands, and a five-minute parent idle relock
+- Unix-socket session agent and a two-second browser restart delay

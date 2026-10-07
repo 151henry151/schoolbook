@@ -106,6 +106,32 @@ def test_parent_login_lists_the_session(tmp_path: Path) -> None:
     assert "Sam" in exported.json()["markdown"]
 
 
+def test_talk_end_without_audio_skips_the_model(tmp_path: Path) -> None:
+    host = _host(tmp_path)
+    client = TestClient(child_app(host))
+    with client.websocket_connect("/ws") as socket:
+        socket.send_json({"type": "hello", "protocol_major": 1, "token": "boot-token"})
+        assert socket.receive_json()["type"] == "hello_ok"
+        socket.send_json({"type": "talk_end", "turn_id": "t1"})
+        message = socket.receive_json()
+        assert message["type"] == "transcript"
+        assert message["text"] == "I didn't catch that."
+    assert host.runtime.llm.requests == []
+
+
+def test_settings_keys_are_write_only_and_idle_relocks(tmp_path: Path) -> None:
+    host = _host(tmp_path)
+    host.secrets_path = tmp_path / "secrets.env"
+    console = TestClient(console_app(host))
+    assert console.post("/api/login", json={"password": "parent-secret"}).status_code == 200
+    saved = console.put("/api/settings", json={"anthropic_api_key": "sk-test", "lan": True})
+    assert saved.json()["anthropic_api_key"] == ""
+    assert "sk-test" in (tmp_path / "secrets.env").read_text(encoding="utf-8")
+    assert console.get("/api/settings").json()["anthropic_api_key"] == ""
+    host.parent_seen_at = 1
+    assert console.get("/api/today").status_code == 401
+
+
 def test_websocket_rejects_the_wrong_protocol_major(tmp_path: Path) -> None:
     host = _host(tmp_path)
     client = TestClient(child_app(host))

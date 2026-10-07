@@ -63,7 +63,63 @@ def spawn(argv: list[str], runner: Callable[..., subprocess.Popen[bytes]] = subp
     return int(process.pid)
 
 
-def xdg_open_stub(argv: list[str]) -> int:
+def xdg_open_stub(argv: list[str], log: Path | None = None) -> int:
     """Replacement for xdg-open in the kid account. It logs and does nothing."""
-    del argv
+    if log is not None:
+        log.parent.mkdir(parents=True, exist_ok=True)
+        with log.open("a", encoding="utf-8") as handle:
+            handle.write(" ".join(argv) + "\n")
     return 0
+
+
+BROWSER_RESTART_S = 2.0
+
+
+def supervise_browser(
+    start: Callable[[], object],
+    wait: Callable[[object], int],
+    sleep: Callable[[float], None],
+    *,
+    limit: int = 3,
+) -> int:
+    """Restart a crashed browser after two seconds. A clean exit stops the loop."""
+    restarts = 0
+    while True:
+        handle = start()
+        code = wait(handle)
+        if code == 0:
+            return restarts
+        restarts += 1
+        if restarts >= limit:
+            return restarts
+        sleep(BROWSER_RESTART_S)
+
+
+def serve_socket(path: Path, allowlist: set[str], ready: Callable[[], None] | None = None) -> None:
+    """Accept one connection of newline-delimited session messages."""
+    import socket
+
+    if path.exists():
+        path.unlink()
+    server = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+    server.bind(str(path))
+    server.listen(1)
+    if ready is not None:
+        ready()
+    connection, _address = server.accept()
+    with connection, server:
+        pending = b""
+        while True:
+            chunk = connection.recv(4096)
+            if not chunk:
+                break
+            pending += chunk
+            while b"\n" in pending:
+                line, pending = pending.split(b"\n", 1)
+                if not line.strip():
+                    continue
+                try:
+                    result = handle_line(line.decode(), allowlist)
+                except Exception as exc:
+                    result = {"type": "error", "message": str(exc)}
+                connection.sendall((json.dumps(result) + "\n").encode())

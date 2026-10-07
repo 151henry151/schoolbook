@@ -15,13 +15,16 @@ from sqlalchemy import select
 from schoolbookd.api import Host
 from schoolbookd.config import SchoolbookConfig, Secrets
 from schoolbookd.content.apps import load_manifests
+from schoolbookd.content.catalog import CharterReviewer, SearchClient, VideoCatalog
 from schoolbookd.content.skills import load_skill_rows
 from schoolbookd.db.engine import backup_database, make_engine, migrate, session_factory
 from schoolbookd.db.models import Learner
 from schoolbookd.db.store import Store
+from schoolbookd.notify import Notifier
 from schoolbookd.policy.output_check import OutputCheck
 from schoolbookd.providers.base import FakeLLM, FakeSTT, FakeTTS, LLMProvider, STTProvider, TTSProvider
 from schoolbookd.runtime import Runtime
+from schoolbookd.safety.classifier import KeywordClassifier
 from schoolbookd.tutor.prompts import load_age_profile
 
 
@@ -40,6 +43,7 @@ def build_host(config: SchoolbookConfig, secrets: Secrets) -> Host:
     config.token_file.write_text(token + "\n", encoding="utf-8")
     with contextlib.suppress(OSError):
         config.token_file.chmod(0o640)
+    reviewer = CharterReviewer()
     runtime = Runtime(
         store=store,
         llm=_llm(config, secrets),
@@ -50,6 +54,21 @@ def build_host(config: SchoolbookConfig, secrets: Secrets) -> Host:
         core_prompt=config.core_prompt.read_text(encoding="utf-8"),
         model=config.model if config.providers.llm == "anthropic" else "fake",
         summary=_llm(config, secrets),
+        catalog=VideoCatalog(
+            store,
+            _youtube(secrets),
+            reviewer,
+            reviewer,
+            duration_minutes=_duration(profile.video_duration_minutes),
+            language=profile.language,
+        ),
+        classifier=KeywordClassifier() if config.providers.classifier else None,
+        notifier=Notifier(
+            config.notifications.ntfy_url,
+            config.notifications.ntfy_topic,
+            config.notifications.email_to,
+        ),
+        min_video_pause_s=float(profile.watch_along_pause_min_seconds),
     )
     return Host(
         runtime=runtime,
@@ -59,6 +78,10 @@ def build_host(config: SchoolbookConfig, secrets: Secrets) -> Host:
         session_secret=secrets.console_session_secret or secrets_mod.token_urlsafe(32),
         dev_text=config.dev_text_input,
         lan_enabled=config.lan.enabled,
+        stt=make_stt(config),
+        secrets_path=config.secrets_file,
+        backup_repository=config.backup.restic_repository,
+        data_dir=config.data_dir,
     )
 
 
@@ -99,6 +122,20 @@ def _tts(config: SchoolbookConfig) -> TTSProvider:
 
         return PiperTTS()
     return FakeTTS()
+
+
+def _duration(window: list[int]) -> tuple[int, int]:
+    if len(window) != 2:
+        return (1, 30)
+    return (window[0], window[1])
+
+
+def _youtube(secrets: Secrets) -> SearchClient | None:
+    if not secrets.youtube_api_key:
+        return None
+    from schoolbookd.providers.youtube import YouTubeClient
+
+    return YouTubeClient(secrets.youtube_api_key)
 
 
 def make_stt(config: SchoolbookConfig) -> STTProvider:

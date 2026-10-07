@@ -10,12 +10,16 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime
 
 from schoolbookd.content.apps import AppManifest, build_argv
+from schoolbookd.content.catalog import VideoCatalog
+from schoolbookd.content.playback import pause_allowed, split_summary
 from schoolbookd.db.models import Video
 from schoolbookd.db.store import Store
 from schoolbookd.learner.memory import assemble_profile
+from schoolbookd.notify import Notifier
 from schoolbookd.policy.output_check import OutputCheck
 from schoolbookd.policy.tools import PolicyContext, ToolPolicy
-from schoolbookd.providers.base import LLMProvider, TTSProvider
+from schoolbookd.providers.base import LLMProvider, LLMRequest, LLMResponse, TTSProvider
+from schoolbookd.safety.classifier import KeywordClassifier
 from schoolbookd.tutor.loop import TurnOutcome, TutorLoop
 from schoolbookd.tutor.prompts import AgeProfile, assemble_prompt
 
@@ -29,6 +33,8 @@ class LiveState:
     playing_video: str | None = None
     paused: bool = False
     screen: str = "home"
+    last_video_pause_at: float | None = None
+    now_s: float = 0.0
 
 
 @dataclass
@@ -42,6 +48,10 @@ class Runtime:
     core_prompt: str
     model: str = "fake"
     summary: LLMProvider | None = None
+    catalog: VideoCatalog | None = None
+    classifier: KeywordClassifier | None = None
+    notifier: Notifier | None = None
+    min_video_pause_s: float = 120
 
     def policy_context(self, live: LiveState) -> PolicyContext:
         disabled = self.store.get_setting("disabled_apps", [])
@@ -79,7 +89,7 @@ class Runtime:
             state,
         )
         loop = TutorLoop(
-            llm=self.llm,
+            llm=_LoggingLLM(self.llm, self.store, live.session_id),
             policy=ToolPolicy(),
             execute=lambda name, args: self._execute(live, name, args),
             output_check=self.output_check,
@@ -87,12 +97,16 @@ class Runtime:
             max_sentences=self.age_profile.max_sentences_per_turn,
             max_words=self.age_profile.max_words_per_sentence,
         )
-        outcome = loop.run_turn(
-            text,
-            system=system,
-            history=live.history,
-            policy_context=self.policy_context(live),
-        )
+        try:
+            outcome = loop.run_turn(
+                text,
+                system=system,
+                history=live.history,
+                policy_context=self.policy_context(live),
+            )
+        except Exception:
+            live.screen = "offline"
+            return TurnOutcome(["The tutor is resting."], [], False, "", False, False)
         child_turn = self.store.add_turn(live.session_id, "child", text)
         tutor_text = " ".join(outcome.sentences)
         tutor_turn = self.store.add_turn(live.session_id, "tutor", tutor_text)
@@ -105,14 +119,30 @@ class Runtime:
                 allowed=record.allowed,
             )
         if outcome.flagged:
+            severity = "high" if "distress" in outcome.flag_reason else "medium"
             self.store.add_flag(
                 session_id=live.session_id,
                 turn_id=child_turn,
-                severity="high" if "distress" in outcome.flag_reason else "medium",
+                severity=severity,
                 reason=outcome.flag_reason or "flagged",
                 source="tutor" if "distress" not in outcome.flag_reason else "output-check",
                 excerpt=text,
             )
+            if severity == "high":
+                self._alert(outcome.flag_reason or "distress")
+        if self.classifier is not None and tutor_text:
+            tone = self.classifier.review(tutor_text)
+            if tone:
+                self.store.add_flag(
+                    session_id=live.session_id,
+                    turn_id=tutor_turn,
+                    severity="medium",
+                    reason=tone,
+                    source="classifier",
+                    excerpt=tutor_text,
+                )
+        calls = self.store.get_setting("model_calls", 0)
+        self.store.put_setting("model_calls", int(calls) + 1 if isinstance(calls, int) else 1, actor="system")
         if outcome.redirected:
             self.store.add_flag(
                 session_id=live.session_id,
@@ -152,8 +182,7 @@ class Runtime:
                     ],
                 )
             )
-            parent_summary = response.text or fallback
-            tutor_notes = response.text
+            parent_summary, tutor_notes = split_summary(response.text or fallback)
         self.store.end_session(live.session_id, reason, parent_summary, tutor_notes)
 
     def _age_text(self) -> str:
@@ -186,6 +215,17 @@ class Runtime:
             self.store.add_note(live.learner_id, "tutor", str(args["text"]), live.session_id)
             return {"stored": True}
         if name == "flag_for_parent":
+            severity = str(args.get("severity", "low"))
+            reason = str(args.get("reason", ""))
+            self.store.add_flag(
+                session_id=live.session_id,
+                turn_id=None,
+                severity=severity,
+                reason=reason,
+                source="tutor",
+            )
+            if severity == "high":
+                self._alert(reason)
             return {"flagged": True}
         if name == "request_content":
             request_id = self.store.request_content(
@@ -193,7 +233,10 @@ class Runtime:
             )
             return {"request_id": request_id, "fetched": False}
         if name == "launch_app":
-            manifest = self.apps[str(args["app_id"])]
+            app_id = str(args["app_id"])
+            if self._cap_reached(app_id):
+                return {"error": "app time cap reached"}
+            manifest = self.apps[app_id]
             activity = args.get("activity")
             activity_id = activity if isinstance(activity, str) else None
             argv = build_argv(manifest, activity_id)
@@ -214,10 +257,16 @@ class Runtime:
             return {"playing": live.playing_video}
         if name == "video_control":
             action = str(args.get("action"))
+            if action == "pause" and not pause_allowed(
+                live.last_video_pause_at, live.now_s, self.min_video_pause_s
+            ):
+                return {"action": "pause", "deferred": True}
+            if action == "pause":
+                live.last_video_pause_at = live.now_s
             if action == "stop":
                 live.playing_video = None
                 live.screen = "home"
-            return {"action": action}
+            return {"action": action, "deferred": False}
         if name == "get_observations":
             notes = live.observations
             live.observations = []
@@ -227,10 +276,26 @@ class Runtime:
         if name == "end_session":
             return {"ending": True}
         if name == "search_videos":
-            return {"candidates": []}
+            if self.catalog is None:
+                return {"candidates": []}
+            return {"candidates": self.catalog.search(str(args["query"]))}
         if name == "vet_video":
-            return {"verdict": "unknown"}
+            if self.catalog is None:
+                return {"verdict": "unknown"}
+            return self.catalog.vet(str(args["video_id"]))
         return {"error": "not implemented"}
+
+    def _cap_reached(self, app_id: str) -> bool:
+        caps = self.store.get_setting("app_caps", {})
+        used = self.store.get_setting("app_minutes", {})
+        if not isinstance(caps, dict) or app_id not in caps:
+            return False
+        so_far = used.get(app_id, 0) if isinstance(used, dict) else 0
+        return int(str(so_far)) >= int(str(caps[app_id]))
+
+    def _alert(self, reason: str) -> None:
+        if self.notifier is not None:
+            self.notifier.send("Schoolbook flag", reason)
 
     def approve_video(self, video_id: str, title: str, channel_id: str, level: int) -> None:
         self.store.save_video(
@@ -246,3 +311,19 @@ class Runtime:
                 duration_s=300,
             )
         )
+
+
+class _LoggingLLM:
+    def __init__(self, inner: LLMProvider, store: Store, session_id: str) -> None:
+        self._inner = inner
+        self._store = store
+        self._session_id = session_id
+
+    def complete(self, request: LLMRequest) -> LLMResponse:
+        response = self._inner.complete(request)
+        self._store.log_exchange(
+            self._session_id,
+            json.dumps({"model": request.model, "messages": len(request.messages)}),
+            json.dumps({"text": response.text, "tools": [call.name for call in response.tool_calls]}),
+        )
+        return response

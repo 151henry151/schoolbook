@@ -478,6 +478,7 @@ class Store:
             self._put_setting(db, "blocked_channels", sorted(ids))
             for video in db.scalars(select(Video).where(Video.channel_id == channel_id)):
                 video.verdict = "blocked"
+                video.verdict_reasons = "channel blocked"
             self.audit(db, "parent", "channel.block", {"id": channel_id})
             db.commit()
 
@@ -585,4 +586,67 @@ class Store:
             if learner is not None:
                 db.delete(learner)
             self.audit(db, "parent", "learner.delete", {"id": learner_id})
+            db.commit()
+
+    def add_image(self, image_id: str, path: str, title: str, license_name: str, tags: str) -> None:
+        with self.session() as db:
+            row = db.get(ImageRow, image_id)
+            if row is None:
+                db.add(ImageRow(id=image_id, path=path, title=title, license=license_name, tags=tags))
+            else:
+                row.path = path
+                row.title = title
+                row.license = license_name
+                row.tags = tags
+            self.audit(db, "parent", "image.save", {"id": image_id})
+            db.commit()
+
+    def unblock_video(self, video_id: str) -> None:
+        with self.session() as db:
+            row = db.get(Video, video_id)
+            if row is not None and row.verdict == "blocked":
+                row.verdict = "approved"
+            self.audit(db, "parent", "video.unblock", {"id": video_id})
+            db.commit()
+
+    def unblock_channel(self, channel_id: str) -> None:
+        with self.session() as db:
+            blocked = self._get_setting(db, "blocked_channels")
+            ids = {str(item) for item in blocked} if isinstance(blocked, list) else set()
+            ids.discard(channel_id)
+            self._put_setting(db, "blocked_channels", sorted(ids))
+            for video in db.scalars(select(Video).where(Video.channel_id == channel_id)):
+                if video.verdict == "blocked" and video.verdict_reasons == "channel blocked":
+                    video.verdict = "approved"
+            self.audit(db, "parent", "channel.unblock", {"id": channel_id})
+            db.commit()
+
+    def set_request_status(self, request_id: str, status: str) -> None:
+        with self.session() as db:
+            row = db.get(ContentRequest, request_id)
+            if row is not None:
+                row.status = status
+            self.audit(db, "parent", "request.update", {"id": request_id, "status": status})
+            db.commit()
+
+    def resolve_flag(self, flag_id: str) -> None:
+        with self.session() as db:
+            row = db.get(Flag, flag_id)
+            if row is not None:
+                row.resolved_at = _now()
+            db.commit()
+
+    def log_exchange(self, session_id: str, request_json: str, response_json: str) -> None:
+        from schoolbookd.db.models import ModelExchange
+
+        with self.session() as db:
+            db.add(
+                ModelExchange(
+                    id=_id(),
+                    session_id=session_id,
+                    turn_id="",
+                    request_json=request_json,
+                    response_json=response_json,
+                )
+            )
             db.commit()

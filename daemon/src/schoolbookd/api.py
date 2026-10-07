@@ -13,14 +13,16 @@ import time
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
+from pathlib import Path
 
-from fastapi import FastAPI, Request, WebSocket
+from fastapi import FastAPI, Request, WebSocket, WebSocketDisconnect
 from fastapi.responses import JSONResponse
 from sqlalchemy import select
 from starlette.responses import Response as StarletteResponse
 
 from schoolbook_protocol.messages import parse_client_message
 from schoolbook_protocol.version import MAJOR
+from schoolbookd.backup import restic_backup_command
 from schoolbookd.db.models import (
     ContentRequest,
     Flag,
@@ -35,9 +37,18 @@ from schoolbookd.db.models import (
     Turn,
     Video,
 )
-from schoolbookd.policy.unlock import UnlockState, attempt_unlock
+from schoolbookd.policy.unlock import UnlockState, attempt_unlock, hash_password
+from schoolbookd.providers.base import STTProvider
 from schoolbookd.runtime import LiveState, Runtime
+from schoolbookd.secrets_file import upsert_secrets
 from schoolbookd.tutor.loop import TurnOutcome
+from schoolbookd.voice.pipeline import (
+    ListenBuffer,
+    append_pcm,
+    encode_audio,
+    sentence_audio,
+    transcribe_buffer,
+)
 
 LOCALHOSTS = {"127.0.0.1", "::1", "testclient", "localhost"}
 
@@ -72,6 +83,15 @@ class Host:
     unlock: UnlockState = field(default_factory=UnlockState)
     attempts: list[float] = field(default_factory=list)
     live: LiveState | None = None
+    stt: STTProvider | None = None
+    buffers: dict[str, ListenBuffer] = field(default_factory=dict)
+    cancelled_turns: set[str] = field(default_factory=set)
+    speaking_turn: str | None = None
+    parent_seen_at: float = 0.0
+    idle_lock_s: float = 300
+    secrets_path: Path | None = None
+    backup_repository: str | None = None
+    data_dir: Path | None = None
 
     def ensure_live(self) -> LiveState:
         if self.live is None or self.runtime.store.open_session(self.learner_id) is None:
@@ -89,7 +109,50 @@ class Host:
         ok, self.unlock = attempt_unlock(password, self.password_hash, self.unlock, _as_datetime(now))
         if not ok:
             return False, "locked" if self.unlock.locked_until else "invalid password"
+        self.parent_seen_at = now
         return True, _sign(self.session_secret, now + 3600)
+
+    def begin_talk(self, turn_id: str) -> None:
+        if self.speaking_turn:
+            self.cancelled_turns.add(self.speaking_turn)
+            self.speaking_turn = None
+        self.buffers[turn_id] = ListenBuffer()
+
+    def add_audio(self, turn_id: str, pcm_b64: str) -> None:
+        buffer = self.buffers.setdefault(turn_id, ListenBuffer())
+        append_pcm(buffer, pcm_b64)
+
+    def finish_talk(self, turn_id: str) -> list[dict[str, object]]:
+        buffer = self.buffers.pop(turn_id, ListenBuffer())
+        if turn_id in self.cancelled_turns:
+            return []
+        learner = self.runtime.store.learner(self.learner_id)
+        hints = [learner.first_name] if learner else []
+        if self.stt is None:
+            text = ""
+        else:
+            text, _confidence = transcribe_buffer(self.stt, buffer, hints)
+        outcome = self.runtime.child_turn(self.ensure_live(), text)
+        if turn_id in self.cancelled_turns:
+            return [{"type": "state", "name": "listening", "detail": "interrupted"}]
+        self.speaking_turn = turn_id
+        messages = _ws_messages(outcome, turn_id)
+        if outcome.sentences == ["The tutor is resting."]:
+            messages.insert(0, {"type": "state", "name": "offline", "detail": "apps"})
+        for seq, pcm in enumerate(sentence_audio(self.runtime.tts, outcome.sentences)):
+            if turn_id in self.cancelled_turns:
+                break
+            messages.append(
+                {
+                    "type": "audio_chunk",
+                    "turn_id": turn_id,
+                    "seq": seq,
+                    "pcm_b64": encode_audio(pcm),
+                    "sample_rate": 16000,
+                }
+            )
+        self.speaking_turn = None
+        return messages
 
 
 def _as_datetime(stamp: float) -> datetime:
@@ -129,6 +192,15 @@ def child_app(host: Host) -> FastAPI:
         outcome = host.runtime.child_turn(host.ensure_live(), body.get("text", ""))
         return JSONResponse(_outcome_payload(outcome))
 
+    @app.post("/unlock")
+    def unlock(body: dict[str, str], request: Request) -> JSONResponse:
+        if request.headers.get("x-schoolbook-token") != host.token:
+            return JSONResponse({"error": "bad token"}, status_code=401)
+        ok, _detail = host.login(body.get("password", ""), time.time())
+        if not ok:
+            return JSONResponse({"error": _detail}, status_code=401)
+        return JSONResponse({"ok": True, "menu": ["console", "pause", "end", "logout", "shutdown"]})
+
     @app.websocket("/ws")
     async def ws(socket: WebSocket) -> None:
         if socket.client and socket.client.host not in LOCALHOSTS:
@@ -150,11 +222,26 @@ def child_app(host: Host) -> FastAPI:
         name = learner.first_name if learner else ""
         await socket.send_json({"type": "hello_ok", "protocol_major": MAJOR, "learner_name": name})
         while True:
-            incoming = parse_client_message(await socket.receive_json())
+            try:
+                incoming = parse_client_message(await socket.receive_json())
+            except WebSocketDisconnect:
+                break
             if incoming.type == "ping":
                 await socket.send_json({"type": "pong"})
             elif incoming.type == "dev_text" and host.dev_text:
                 outcome = host.runtime.child_turn(host.ensure_live(), incoming.text)
+                for message in _ws_messages(outcome, incoming.turn_id):
+                    await socket.send_json(message)
+            elif incoming.type == "talk_start":
+                host.begin_talk(incoming.turn_id)
+                await socket.send_json({"type": "state", "name": "listening", "detail": ""})
+            elif incoming.type == "audio_frame":
+                host.add_audio(incoming.turn_id, incoming.pcm_b64)
+            elif incoming.type == "talk_end":
+                for message in host.finish_talk(incoming.turn_id):
+                    await socket.send_json(message)
+            elif incoming.type == "choice":
+                outcome = host.runtime.child_turn(host.ensure_live(), f"I choose {incoming.option_id}")
                 for message in _ws_messages(outcome, incoming.turn_id):
                     await socket.send_json(message)
             elif incoming.type == "unlock_gesture":
@@ -181,7 +268,13 @@ def console_app(host: Host) -> FastAPI:
         if not host.lan_enabled and not _local_only(request):
             return False
         cookie = request.cookies.get("schoolbook_session", "")
-        return _valid(host.session_secret, cookie, time.time())
+        now = time.time()
+        if not _valid(host.session_secret, cookie, now):
+            return False
+        if host.parent_seen_at and now - host.parent_seen_at > host.idle_lock_s:
+            return False
+        host.parent_seen_at = now
+        return True
 
     @app.middleware("http")
     async def guard(
@@ -207,12 +300,28 @@ def console_app(host: Host) -> FastAPI:
         live = host.live
         flags = _flags(host)
         latest = _sessions(host)
+        minutes = 0.0
+        if latest:
+            started = latest[-1].started_at
+            if started.tzinfo is None:
+                started = started.replace(tzinfo=UTC)
+            if latest[-1].ended_at is None:
+                minutes = (datetime.now(UTC) - started).total_seconds() / 60
+        calls = host.runtime.store.get_setting("model_calls", 0)
+        alert = host.runtime.store.get_setting("spend_alert_cents", 0)
         return {
             "in_session": live is not None,
             "paused": bool(live and live.paused),
             "screen": live.screen if live else "idle",
-            "open_flags": [row.reason for row in flags if row.resolved_at is None][:5],
+            "minutes": round(minutes, 1),
+            "open_flags": [
+                {"id": row.id, "reason": row.reason, "severity": row.severity, "excerpt": row.excerpt}
+                for row in flags
+                if row.resolved_at is None
+            ][:5],
             "latest_summary": latest[-1].parent_summary if latest else "",
+            "model_calls": calls if isinstance(calls, int) else 0,
+            "spend_alert_cents": alert if isinstance(alert, int) else 0,
         }
 
     @app.get("/api/sessions")
@@ -373,6 +482,141 @@ def console_app(host: Host) -> FastAPI:
     def export() -> dict[str, str]:
         return {"markdown": host.runtime.store.export_markdown(host.learner_id)}
 
+    @app.post("/api/memory/notes")
+    def add_note(body: dict[str, str]) -> dict[str, str]:
+        note_id = host.runtime.store.add_note(
+            host.learner_id, body.get("kind", "house"), body.get("text", ""), None
+        )
+        return {"id": note_id}
+
+    @app.post("/api/library/videos/{video_id}/unblock")
+    def unblock_video(video_id: str) -> dict[str, bool]:
+        host.runtime.store.unblock_video(video_id)
+        return {"ok": True}
+
+    @app.post("/api/library/channels/{channel_id}/unblock")
+    def unblock_channel(channel_id: str) -> dict[str, bool]:
+        host.runtime.store.unblock_channel(channel_id)
+        return {"ok": True}
+
+    @app.post("/api/library/images")
+    def add_image(body: dict[str, str]) -> dict[str, bool]:
+        image_id = body.get("id", "")
+        if not image_id or "/" in image_id or ".." in image_id:
+            return {"ok": False}
+        directory = host.data_dir or Path("images")
+        directory.mkdir(parents=True, exist_ok=True)
+        target = directory / f"{image_id}.svg"
+        target.write_text(body.get("svg", ""), encoding="utf-8")
+        host.runtime.store.add_image(
+            image_id, str(target), body.get("title", image_id), body.get("license", ""), body.get("tags", "")
+        )
+        return {"ok": True}
+
+    @app.post("/api/requests/{request_id}")
+    def update_request(request_id: str, body: dict[str, str]) -> dict[str, bool]:
+        host.runtime.store.set_request_status(request_id, body.get("status", "pending"))
+        return {"ok": True}
+
+    @app.post("/api/apps/{app_id}/enable")
+    def enable_app(app_id: str) -> dict[str, bool]:
+        disabled = host.runtime.store.get_setting("disabled_apps", [])
+        ids = set(disabled) if isinstance(disabled, list) else set()
+        ids.discard(app_id)
+        host.runtime.store.put_setting("disabled_apps", sorted(str(item) for item in ids))
+        return {"ok": True}
+
+    @app.put("/api/apps/{app_id}")
+    def app_cap(app_id: str, body: dict[str, object]) -> dict[str, bool]:
+        caps = host.runtime.store.get_setting("app_caps", {})
+        mapping = dict(caps) if isinstance(caps, dict) else {}
+        if "cap_minutes" in body:
+            mapping[app_id] = body["cap_minutes"]
+            host.runtime.store.put_setting("app_caps", mapping)
+        if body.get("enabled") is False:
+            disable_ids = host.runtime.store.get_setting("disabled_apps", [])
+            ids = set(disable_ids) if isinstance(disable_ids, list) else set()
+            ids.add(app_id)
+            host.runtime.store.put_setting("disabled_apps", sorted(str(item) for item in ids))
+        return {"ok": True}
+
+    @app.patch("/api/learner")
+    def update_learner(body: dict[str, object]) -> dict[str, bool]:
+        current = host.runtime.store.learner(host.learner_id)
+        if current is None:
+            return {"ok": False}
+        first_name = body.get("first_name", current.first_name)
+        birth_year = body.get("birth_year", current.birth_year)
+        host.runtime.store.upsert_learner(
+            learner_id=host.learner_id,
+            first_name=str(first_name),
+            birth_year=int(str(birth_year)),
+            age_profile=str(body.get("age_profile", current.age_profile)),
+            avatar=str(body.get("avatar", current.avatar)),
+            voice=str(body.get("voice", current.voice)),
+            talk_mode=str(body.get("talk_mode", current.talk_mode)),
+        )
+        return {"ok": True}
+
+    @app.put("/api/settings")
+    def update_settings(body: dict[str, object]) -> dict[str, object]:
+        if "lan" in body:
+            host.lan_enabled = bool(body["lan"])
+        if isinstance(body.get("model"), str):
+            host.runtime.model = str(body["model"])
+        if "break_suggestions" in body:
+            host.runtime.store.put_setting("break_suggestions", body["break_suggestions"])
+        if "spend_alert_cents" in body:
+            host.runtime.store.put_setting("spend_alert_cents", body["spend_alert_cents"])
+        updates: dict[str, str] = {}
+        for key, env_name in (
+            ("anthropic_api_key", "ANTHROPIC_API_KEY"),
+            ("youtube_api_key", "YOUTUBE_API_KEY"),
+        ):
+            value = body.get(key)
+            if isinstance(value, str) and value:
+                updates[env_name] = value
+        password = body.get("parent_password")
+        if isinstance(password, str) and password:
+            host.password_hash = hash_password(password)
+            updates["PARENT_PASSWORD_HASH"] = host.password_hash
+        if updates and host.secrets_path is not None:
+            upsert_secrets(host.secrets_path, updates)
+        return {"ok": True, "anthropic_api_key": "", "youtube_api_key": ""}
+
+    @app.post("/api/session/relock")
+    def relock() -> dict[str, bool]:
+        host.parent_seen_at = 0.0
+        return {"ok": True}
+
+    @app.post("/api/session/logout")
+    def logout() -> dict[str, str]:
+        host.parent_seen_at = 0.0
+        return {"action": "greeter"}
+
+    @app.post("/api/session/shutdown")
+    def shutdown() -> dict[str, str]:
+        host.runtime.store.put_setting("shutdown_requested", True, actor="parent")
+        return {"action": "shutdown"}
+
+    @app.post("/api/flags/{flag_id}/resolve")
+    def resolve_flag(flag_id: str) -> dict[str, bool]:
+        host.runtime.store.resolve_flag(flag_id)
+        return {"ok": True}
+
+    @app.get("/api/backup")
+    def backup() -> dict[str, object]:
+        if not host.backup_repository or host.data_dir is None:
+            return {"configured": False, "command": []}
+        command = restic_backup_command(host.backup_repository, [host.data_dir])
+        return {"configured": True, "command": command}
+
+    @app.post("/api/learner/delete")
+    def delete_learner() -> dict[str, bool]:
+        host.runtime.store.delete_learner_data(host.learner_id)
+        host.live = None
+        return {"ok": True}
+
     return app
 
 
@@ -395,21 +639,22 @@ def _outcome_payload(outcome: TurnOutcome) -> dict[str, object]:
 
 
 def _ws_messages(outcome: TurnOutcome, turn_id: str) -> list[dict[str, object]]:
-    messages: list[dict[str, object]] = [
-        {
-            "type": "transcript",
-            "turn_id": turn_id,
-            "role": "tutor",
-            "text": " ".join(outcome.sentences),
-            "partial": False,
-        }
-    ]
+    messages: list[dict[str, object]] = []
     for record in outcome.tool_calls:
         if not record.allowed:
             continue
         if record.name == "show_board":
             elements = record.arguments.get("elements", [])
             messages.append({"type": "board", "turn_id": turn_id, "elements": elements})
+        if record.name == "ask_choice":
+            messages.append(
+                {
+                    "type": "choices",
+                    "turn_id": turn_id,
+                    "prompt": record.arguments.get("prompt", ""),
+                    "options": record.arguments.get("options", []),
+                }
+            )
         if record.name == "play_video":
             messages.append(
                 {
@@ -421,4 +666,13 @@ def _ws_messages(outcome: TurnOutcome, turn_id: str) -> list[dict[str, object]]:
                     "at_s": None,
                 }
             )
+    messages.append(
+        {
+            "type": "transcript",
+            "turn_id": turn_id,
+            "role": "tutor",
+            "text": " ".join(outcome.sentences),
+            "partial": False,
+        }
+    )
     return messages
