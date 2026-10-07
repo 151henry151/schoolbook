@@ -22,3 +22,5 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Tutor loop with fake providers, sentence limits, output checks, and distress flags
 - Database store for sessions, skills, interests, notes, videos, and forget
 - Runtime that logs a scripted child turn and builds app argv from manifests
+- Child WebSocket and parent console HTTP API with login lockout and channel blocks
+- Session agent that launches only allowlisted argv and keeps Chromium on localhost
