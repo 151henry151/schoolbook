@@ -5,6 +5,7 @@ import { useEffect, useRef, useState } from "react";
 import { Board } from "./board";
 import { HOLD_MS, OFFLINE_APPS, holdComplete } from "./capture";
 import { PROTOCOL_MAJOR, type BoardElement } from "./protocol";
+import { ParentUnlock } from "./unlock";
 import { VideoOverlay } from "./video";
 
 type Phase = "home" | "talk";
@@ -20,7 +21,7 @@ export function App() {
   const [videoId, setVideoId] = useState("");
   const [offline, setOffline] = useState(false);
   const [unlock, setUnlock] = useState(false);
-  const [password, setPassword] = useState("");
+  const [token, setToken] = useState("");
   const [draft, setDraft] = useState("");
   const [socket, setSocket] = useState<WebSocket | null>(null);
   const [listening, setListening] = useState(false);
@@ -35,6 +36,7 @@ export function App() {
       if (!response.ok) return;
       const body = (await response.json()) as { token: string };
       if (!active) return;
+      setToken(body.token);
       const ws = new WebSocket(`${location.protocol === "https:" ? "wss" : "ws"}://${location.host}/ws`);
       opened = ws;
       ws.onmessage = (event) => {
@@ -174,29 +176,7 @@ export function App() {
         </form>
       ) : null}
       {videoId ? <VideoOverlay videoId={videoId} onDone={() => { setVideoId(""); send({ type: "video_ui", action: "done" }); }} /> : null}
-      {unlock ? (
-        <form
-          className="unlock"
-          aria-label="parent password"
-          onSubmit={(event) => {
-            event.preventDefault();
-            void fetch("/unlock", {
-              method: "POST",
-              headers: { "content-type": "application/json" },
-              body: JSON.stringify({ password }),
-            });
-            setPassword("");
-          }}
-        >
-          <input
-            aria-label="parent password"
-            type="password"
-            value={password}
-            onChange={(event) => setPassword(event.target.value)}
-          />
-          <button type="submit">Unlock</button>
-        </form>
-      ) : null}
+      {unlock ? <ParentUnlock token={token} /> : null}
     </main>
   );
 }

@@ -139,3 +139,26 @@ def test_websocket_rejects_the_wrong_protocol_major(tmp_path: Path) -> None:
         socket.send_json({"type": "hello", "protocol_major": 99, "token": "boot-token"})
         message = socket.receive_json()
         assert message["type"] == "error"
+
+
+def test_parent_end_session_requests_kiosk_exit(tmp_path: Path) -> None:
+    host = _host(tmp_path)
+    host.data_dir = tmp_path
+    console = TestClient(console_app(host))
+    assert console.post("/api/login", json={"password": "parent-secret"}).status_code == 200
+    assert console.post("/api/session/end").status_code == 200
+    assert (tmp_path / "kiosk.end").read_text(encoding="utf-8").strip() == "end"
+
+
+def test_child_unlock_end_requests_kiosk_exit(tmp_path: Path) -> None:
+    host = _host(tmp_path)
+    host.data_dir = tmp_path
+    child = TestClient(child_app(host))
+    ended = child.post(
+        "/unlock",
+        json={"password": "parent-secret", "action": "end"},
+        headers={"x-schoolbook-token": "boot-token"},
+    )
+    assert ended.status_code == 200
+    assert ended.json()["ended"] is True
+    assert (tmp_path / "kiosk.end").read_text(encoding="utf-8").strip() == "end"

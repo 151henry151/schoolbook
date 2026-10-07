@@ -39,6 +39,8 @@ def chromium_kiosk_argv(url: str, binary: str = "chromium") -> list[str]:
         "--kiosk",
         "--no-first-run",
         "--disable-translate",
+        "--disable-infobars",
+        "--password-store=basic",
         "--autoplay-policy=no-user-gesture-required",
         url,
     ]

@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- `schoolbook` command that starts the daemon and a cage Chromium kiosk from one binary
+- Session-agent `kiosk` mode that launches localhost Chromium `--kiosk` and restarts it after a crash
+- Parent End session writes a kiosk exit flag so cage returns to the previous session
+
+### Changed
+
+- Child unlock dialog sends the boot token and shows an End session action after a correct password
+- Chromium policy allowlist includes the parent console on `127.0.0.1:8766`
+
 ## [0.9.0] - 2026-10-07
 
 ### Added

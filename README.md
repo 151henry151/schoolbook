@@ -2,7 +2,7 @@
 
 Schoolbook is a locked-down Linux learning environment for one child. The machine boots into a kiosk. The child talks with a tutor, sees a full-screen board, watches vetted videos, and can open a short list of educational apps. A parent console on a separate port shows what happened.
 
-Version 0.9.0 is the software described through phase 8 of [docs/design-spec.md](docs/design-spec.md). Version 1.0.0 waits for a real pilot with a parent nearby. This repository does not apply kiosk lockdown to the machine it is developed on.
+Version 0.9.0 is the software described through phase 8 of [docs/design-spec.md](docs/design-spec.md). Version 1.0.0 waits for a real pilot with a parent nearby. `schoolbook` starts a cage kiosk for the current session. It does not replace the machine's login manager; `packaging/install.sh` is the path that boots straight into Schoolbook.
 
 ## Layout
 
@@ -32,11 +32,22 @@ cd e2e && npm ci && npx playwright test
 
 `packaging/install.sh --dry-run` prints the lockdown steps. Run the script with sudo only on a machine you intend to turn into a kiosk.
 
-## Run a local daemon
+## Run the kiosk
 
-Point `schoolbookd --config` at a YAML file with `data_dir`, `share_dir` (this repository), and `etc_dir` (learner, apps, output check, secrets). `schoolbookd --check-config` refuses a bad file. `schoolbookd --self-test` opens the database and speaks a sample. `schoolbookd serve` listens on `127.0.0.1` for the child and, unless LAN access is enabled, on `127.0.0.1` for the console.
+Install `cage` and Chromium (`sudo apt install cage chromium` on Debian). Build the UIs once, then start everything with one command:
 
-Add `?dev=1` to the child UI to type instead of using the microphone. API keys stay write-only in the console.
+```bash
+(cd ui && npm ci && npm run build)
+(cd console && npm ci && npm run build)
+uv sync --frozen
+uv run schoolbook --parent-password 'choose-a-parent-password'
+```
+
+That starts the daemon and opens Chromium inside cage. Hold the top-right corner for five seconds, enter the parent password, and choose **End session** to leave. Later runs can omit `--parent-password` if the runtime under `~/.local/share/schoolbook` already exists.
+
+Speech-to-text is still the fake provider, so the developer text box is on by default. Pass `--no-dev` to hide it. On an existing desktop, cage runs nested and the host compositor may still allow Super or Alt-Tab; run `schoolbook` from a TTY for a full lock.
+
+`schoolbookd --config` still serves only the HTTP API if you need that without cage.
 
 ## License
 

@@ -20,6 +20,7 @@ dependencies = [
 
 [project.scripts]
 schoolbookd = "schoolbookd.__main__:main"
+schoolbook = "schoolbookd.launch:main"
 
 [build-system]
 requires = ["hatchling"]

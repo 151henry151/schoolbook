@@ -94,6 +94,12 @@ class Host:
     backup_repository: str | None = None
     data_dir: Path | None = None
 
+    def request_kiosk_end(self) -> None:
+        if self.data_dir is None:
+            return
+        self.data_dir.mkdir(parents=True, exist_ok=True)
+        (self.data_dir / "kiosk.end").write_text("end\n", encoding="utf-8")
+
     def ensure_live(self) -> LiveState:
         if self.live is None or self.runtime.store.open_session(self.learner_id) is None:
             session_id = self.runtime.store.start_session(self.learner_id, self.runtime.model)
@@ -201,7 +207,12 @@ def child_app(host: Host) -> FastAPI:
         ok, _detail = host.login(body.get("password", ""), time.time())
         if not ok:
             return JSONResponse({"error": _detail}, status_code=401)
-        return JSONResponse({"ok": True, "menu": ["console", "pause", "end", "logout", "shutdown"]})
+        ended = body.get("action") == "end"
+        if ended:
+            host.request_kiosk_end()
+        return JSONResponse(
+            {"ok": True, "menu": ["console", "pause", "end", "logout", "shutdown"], "ended": ended}
+        )
 
     @app.websocket("/ws")
     async def ws(socket: WebSocket) -> None:
@@ -463,6 +474,7 @@ def console_app(host: Host) -> FastAPI:
         live = host.ensure_live()
         host.runtime.end_from_parent(live)
         host.live = None
+        host.request_kiosk_end()
         return {"ok": True}
 
     @app.get("/api/learner")
