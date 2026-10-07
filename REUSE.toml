@@ -6,6 +6,7 @@ SPDX-PackageDownloadLocation = "https://github.com/151henry151/schoolbook"
 [[annotations]]
 path = [
   "LICENSE",
+  "NOTICE",
   "VERSION",
   "CHANGELOG.md",
   "README.md",
@@ -19,11 +20,15 @@ path = [
   "packaging/**",
   "**/*.yaml",
   "**/*.yml",
+  "**/*.toml",
   "**/*.json",
   "**/*.md",
   "**/*.html",
   "**/*.css",
   "**/*.svg",
+  "**/*.ts",
+  "**/*.js",
+  "**/*.mako",
   "**/*.lock",
   "uv.lock",
   "**/package-lock.json",

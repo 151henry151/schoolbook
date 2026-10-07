@@ -8,8 +8,8 @@ from __future__ import annotations
 from schoolbook_protocol.version import MAJOR
 
 _LINES = [
-    "// SPDX-License-Identifier: GPL-3.0-or-later",
-    "// SPDX-FileCopyrightText: 2026 Schoolbook contributors",
+    "// SPDX-" + "License-Identifier: GPL-3.0-or-later",
+    "// SPDX-" + "FileCopyrightText: 2026 Schoolbook contributors",
     "",
     "/** Generated from schoolbook_protocol. Do not edit by hand. */",
     f"export const PROTOCOL_MAJOR = {MAJOR};",

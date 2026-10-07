@@ -88,6 +88,7 @@ class Host:
     cancelled_turns: set[str] = field(default_factory=set)
     speaking_turn: str | None = None
     parent_seen_at: float = 0.0
+    parent_locked: bool = False
     idle_lock_s: float = 300
     secrets_path: Path | None = None
     backup_repository: str | None = None
@@ -110,6 +111,7 @@ class Host:
         if not ok:
             return False, "locked" if self.unlock.locked_until else "invalid password"
         self.parent_seen_at = now
+        self.parent_locked = False
         return True, _sign(self.session_secret, now + 3600)
 
     def begin_talk(self, turn_id: str) -> None:
@@ -244,6 +246,11 @@ def child_app(host: Host) -> FastAPI:
                 outcome = host.runtime.child_turn(host.ensure_live(), f"I choose {incoming.option_id}")
                 for message in _ws_messages(outcome, incoming.turn_id):
                     await socket.send_json(message)
+            elif incoming.type == "home":
+                live = host.ensure_live()
+                live.screen = "home"
+                live.playing_video = None
+                await socket.send_json({"type": "state", "name": "home", "detail": ""})
             elif incoming.type == "unlock_gesture":
                 await socket.send_json({"type": "state", "name": "parent_unlock", "detail": ""})
             elif incoming.type == "video_ui":
@@ -269,9 +276,12 @@ def console_app(host: Host) -> FastAPI:
             return False
         cookie = request.cookies.get("schoolbook_session", "")
         now = time.time()
+        if host.parent_locked:
+            return False
         if not _valid(host.session_secret, cookie, now):
             return False
         if host.parent_seen_at and now - host.parent_seen_at > host.idle_lock_s:
+            host.parent_locked = True
             return False
         host.parent_seen_at = now
         return True
@@ -280,7 +290,7 @@ def console_app(host: Host) -> FastAPI:
     async def guard(
         request: Request, call_next: Callable[[Request], Awaitable[StarletteResponse]]
     ) -> StarletteResponse:
-        if request.url.path == "/api/login":
+        if request.url.path == "/api/login" or not request.url.path.startswith("/api/"):
             return await call_next(request)
         if not authorized(request):
             return JSONResponse({"error": "unauthorized"}, status_code=401)
@@ -586,6 +596,7 @@ def console_app(host: Host) -> FastAPI:
 
     @app.post("/api/session/relock")
     def relock() -> dict[str, bool]:
+        host.parent_locked = True
         host.parent_seen_at = 0.0
         return {"ok": True}
 

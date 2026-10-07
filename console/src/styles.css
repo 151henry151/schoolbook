@@ -1,0 +1,6 @@
+:root { font-family: "Segoe UI", sans-serif; color: #1c1915; background: #f4f1ea; }
+body { margin: 0; }
+button, input, select { min-height: 44px; font-size: 1rem; }
+header { display: flex; gap: 0.5rem; flex-wrap: wrap; padding: 1rem; }
+main { padding: 1rem; }
+.flag { background: #f3d2cf; padding: 0.75rem; }

@@ -34,3 +34,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Tap-to-talk transcription, sentence audio, write-only settings, image upload, and app time caps
 - Optional ntfy alerts, restic backup commands, and a five-minute parent idle relock
 - Unix-socket session agent and a two-second browser restart delay
+- Child video overlay on the youtube-nocookie embed, a five-second parent hold, and an offline app shelf
+- Parent console screens for today, sessions, progress, memory, library, apps, session, learner, and settings
+- Playwright coverage for a typed child turn, console login, relock, and password lockout
+- GitHub Actions workflow for lint, types, tests, UI builds, and end-to-end tests
+- CC0 star image and a NOTICE file for bundled media licenses

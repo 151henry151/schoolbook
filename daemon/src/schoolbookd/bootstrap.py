@@ -34,6 +34,7 @@ def build_host(config: SchoolbookConfig, secrets: Secrets) -> Host:
     migrate(engine)
     store = Store(session_factory(engine))
     store.replace_skills(load_skill_rows(config.skills_file))
+    _load_images(store, config.share_dir / "images")
     _ensure_learner(store, config.etc_dir / "learner.yaml")
     learner_id = _first_learner_id(store)
     apps = load_manifests(config.apps_dir)
@@ -83,6 +84,13 @@ def build_host(config: SchoolbookConfig, secrets: Secrets) -> Host:
         backup_repository=config.backup.restic_repository,
         data_dir=config.data_dir,
     )
+
+
+def _load_images(store: Store, directory: Path) -> None:
+    if not directory.is_dir():
+        return
+    for path in sorted(directory.glob("*.svg")):
+        store.add_image(path.stem, str(path), path.stem, "CC0-1.0", "shipped")
 
 
 def _ensure_learner(store: Store, path: Path) -> None:

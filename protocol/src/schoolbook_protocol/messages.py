@@ -64,6 +64,10 @@ class UnlockGesture(BaseModel):
     type: Literal["unlock_gesture"] = "unlock_gesture"
 
 
+class GoHome(BaseModel):
+    type: Literal["home"] = "home"
+
+
 class Ping(BaseModel):
     type: Literal["ping"] = "ping"
 
@@ -78,6 +82,7 @@ ClientMessage = Annotated[
     | BoardTap
     | VideoUi
     | UnlockGesture
+    | GoHome
     | Ping,
     Field(discriminator="type"),
 ]
