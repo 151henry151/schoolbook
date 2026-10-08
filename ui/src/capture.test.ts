@@ -14,5 +14,7 @@ test("video embeds stay on the nocookie domain without player controls", () => {
   expect(url.startsWith("https://www.youtube-nocookie.com/embed/abcdefghijk")).toBe(true);
   expect(url).toContain("rel=0");
   expect(url).toContain("controls=0");
+  expect(url).toContain("autoplay=1");
+  expect(url).toContain("enablejsapi=1");
   expect(() => embedUrl("https://evil.example")).toThrow();
 });

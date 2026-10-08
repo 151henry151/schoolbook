@@ -43,7 +43,7 @@ _LINES = [
     '  | { type: "ping" };',
     "",
     "export type DaemonMessage =",
-    '  | { type: "hello_ok"; protocol_major: number; learner_name: string }',
+    '  | { type: "hello_ok"; protocol_major: number; learner_name: string; talk_mode: string; voice: string }',
     '  | { type: "transcript"; turn_id: string;',
     '      role: "child" | "tutor"; text: string; partial: boolean }',
     '  | { type: "board"; turn_id: string; elements: BoardElement[] }',

@@ -44,7 +44,7 @@ mypy_path = ["protocol/src", "daemon/src", "session/src"]
 namespace_packages = false
 
 [[tool.mypy.overrides]]
-module = ["yaml", "yaml.*"]
+module = ["yaml", "yaml.*", "faster_whisper", "faster_whisper.*"]
 ignore_missing_imports = true
 
 [tool.pytest.ini_options]

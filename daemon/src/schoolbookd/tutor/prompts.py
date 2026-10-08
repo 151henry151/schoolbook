@@ -19,7 +19,7 @@ class AgeProfile(BaseModel):
     max_sentences_per_turn: int = 3
     max_words_per_sentence: int = 12
     target_reading_grade: int = 1
-    talk_mode_default: str = "tap"
+    talk_mode_default: str = "handsfree"
     break_suggestions: str = "gentle"
     video_duration_minutes: list[int] = Field(default_factory=lambda: [1, 30])
     video_stretch_steps: int = 1

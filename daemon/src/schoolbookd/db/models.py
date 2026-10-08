@@ -27,7 +27,7 @@ class Learner(Base):
     age_profile: Mapped[str] = mapped_column(String)
     avatar: Mapped[str] = mapped_column(String, default="star")
     voice: Mapped[str] = mapped_column(String, default="piper-warm")
-    talk_mode: Mapped[str] = mapped_column(String, default="tap")
+    talk_mode: Mapped[str] = mapped_column(String, default="handsfree")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
 
 

@@ -4,6 +4,10 @@
 import { useEffect, useRef, useState } from "react";
 import { Board } from "./board";
 import { HOLD_MS, OFFLINE_APPS, holdComplete } from "./capture";
+import { armed, armIfWaiting, stepHandsFree, type HandsFreeState } from "./handsfree";
+import { createCaptureContext, startMic } from "./mic";
+import { PlaybackQueue, decodePcm16, webAudioPlayer } from "./playback";
+import { createVad, encodePcm16 } from "./pcm";
 import { PROTOCOL_MAJOR, type BoardElement } from "./protocol";
 import { ParentUnlock } from "./unlock";
 import { VideoOverlay } from "./video";
@@ -24,9 +28,26 @@ export function App() {
   const [token, setToken] = useState("");
   const [draft, setDraft] = useState("");
   const [socket, setSocket] = useState<WebSocket | null>(null);
-  const [listening, setListening] = useState(false);
+  const [status, setStatus] = useState("Listening");
+  const [voice, setVoice] = useState("pipeline");
+  const voiceRef = useRef("pipeline");
   const holdStarted = useRef<number | null>(null);
+  const hands = useRef<HandsFreeState>(armed());
+  const seq = useRef(0);
+  const speaking = useRef(false);
+  const queue = useRef(new PlaybackQueue(webAudioPlayer()));
+  const socketRef = useRef<WebSocket | null>(null);
+  const capture = useRef<AudioContext | null>(null);
+  const vad = useRef(createVad());
   const dev = new URLSearchParams(window.location.search).has("dev");
+
+  useEffect(() => {
+    socketRef.current = socket;
+  }, [socket]);
+
+  useEffect(() => {
+    voiceRef.current = voice;
+  }, [voice]);
 
   useEffect(() => {
     let active = true;
@@ -44,25 +65,57 @@ export function App() {
           type: string;
           learner_name?: string;
           text?: string;
+          role?: string;
+          turn_id?: string;
           elements?: BoardElement[];
           video_id?: string;
           action?: string;
           name?: string;
           options?: Choice[];
+          pcm_b64?: string;
+          sample_rate?: number;
+          voice?: string;
+          detail?: string;
         };
-        if (message.type === "hello_ok" && message.learner_name) setName(message.learner_name);
+        if (message.type === "hello_ok") {
+          if (message.learner_name) setName(message.learner_name);
+          if (message.voice) setVoice(message.voice);
+        }
         if (message.type === "transcript" && message.text) {
           setTranscript(message.text);
-          setListening(false);
+          if (message.role === "tutor") {
+            speaking.current = true;
+            setStatus("Talking");
+          }
+        }
+        if (message.type === "audio_chunk" && message.turn_id && message.pcm_b64) {
+          speaking.current = true;
+          setStatus("Talking");
+          const pcm = decodePcm16(message.pcm_b64);
+          if (typeof speechSynthesis !== "undefined") speechSynthesis.cancel();
+          if (pcm.length > 0) {
+            void queue.current.enqueue(message.turn_id, pcm, message.sample_rate || 24000);
+          }
         }
         if (message.type === "board" && message.elements) setElements(message.elements);
-        if (message.type === "choices" && message.options) setChoices(message.options);
+        if (message.type === "choices" && message.options && voiceRef.current !== "realtime") {
+          setChoices(message.options);
+        }
         if (message.type === "video" && message.action === "play" && message.video_id) setVideoId(message.video_id);
         if (message.type === "video" && (message.action === "stop" || message.action === "destroy")) setVideoId("");
         if (message.type === "state" && message.name === "offline") setOffline(true);
         if (message.type === "state" && message.name === "home") setOffline(false);
         if (message.type === "state" && message.name === "parent_unlock") setUnlock(true);
-        if (message.type === "state" && message.name === "listening") setListening(true);
+        if (message.type === "state" && message.name === "thinking") setStatus("Thinking");
+        if (message.type === "state" && message.name === "speaking") {
+          speaking.current = true;
+          setStatus("Talking");
+        }
+        if (message.type === "state" && message.name === "listening") {
+          speaking.current = false;
+          hands.current = armIfWaiting(hands.current);
+          setStatus(message.detail === "hearing" ? "I hear you" : "Listening");
+        }
       };
       ws.onopen = () => {
         ws.send(JSON.stringify({ type: "hello", protocol_major: PROTOCOL_MAJOR, token: body.token }));
@@ -75,6 +128,71 @@ export function App() {
     };
   }, []);
 
+  useEffect(() => {
+    if (phase !== "talk" || videoId) return;
+    let stop: (() => void) | undefined;
+    void startMic((pcm, dtMs) => {
+      const ws = socketRef.current;
+      if (!ws || ws.readyState !== WebSocket.OPEN) return;
+      if (voice === "realtime") {
+        if (speaking.current) return;
+        ws.send(
+          JSON.stringify({
+            type: "audio_frame",
+            turn_id: "live",
+            seq: seq.current,
+            pcm_b64: encodePcm16(pcm),
+            sample_rate: 16000,
+          }),
+        );
+        seq.current += 1;
+        return;
+      }
+      const hearing = vad.current(pcm);
+      const result = stepHandsFree(
+        hands.current,
+        { voiced: hearing, dtMs, speaking: speaking.current },
+        () => crypto.randomUUID(),
+      );
+      hands.current = result.state;
+      const event = result.event;
+      if (!event) return;
+      if (event.type === "start" || event.type === "interrupt") {
+        seq.current = 0;
+        if (event.type === "interrupt") {
+          queue.current.interrupt();
+          speaking.current = false;
+        }
+        ws.send(JSON.stringify({ type: "talk_start", turn_id: event.turnId }));
+        setStatus("I hear you");
+      }
+      if (event.type === "start" || event.type === "interrupt" || event.type === "frame") {
+        if (event.type === "frame") setStatus(hearing ? "I hear you" : "Listening");
+        ws.send(
+          JSON.stringify({
+            type: "audio_frame",
+            turn_id: event.turnId,
+            seq: seq.current,
+            pcm_b64: encodePcm16(pcm),
+            sample_rate: 16000,
+          }),
+        );
+        seq.current += 1;
+      }
+      if (event.type === "end") {
+        setStatus("Thinking");
+        ws.send(JSON.stringify({ type: "talk_end", turn_id: event.turnId }));
+      }
+    }, capture.current ?? undefined)
+      .then((value) => {
+        stop = value;
+      })
+      .catch(() => {
+        setStatus("I cannot hear the microphone");
+      });
+    return () => stop?.();
+  }, [phase, voice, videoId]);
+
   function send(message: object) {
     socket?.send(JSON.stringify(message));
   }
@@ -83,19 +201,6 @@ export function App() {
     if (!draft.trim()) return;
     send({ type: "dev_text", turn_id: crypto.randomUUID(), text: draft });
     setDraft("");
-  }
-
-  function toggleTalk() {
-    const turnId = crypto.randomUUID();
-    if (!listening) {
-      setListening(true);
-      send({ type: "talk_start", turn_id: turnId });
-      sessionStorage.setItem("schoolbook-turn", turnId);
-      return;
-    }
-    const current = sessionStorage.getItem("schoolbook-turn") || turnId;
-    send({ type: "talk_end", turn_id: current });
-    setListening(false);
   }
 
   function finishHold() {
@@ -110,7 +215,22 @@ export function App() {
   if (phase === "home") {
     return (
       <main className="home">
-        <button type="button" className="avatar" onClick={() => setPhase("talk")}>
+        <button
+          type="button"
+          className="avatar"
+          onClick={() => {
+            try {
+              const context = createCaptureContext();
+              void context.resume();
+              capture.current = context;
+              vad.current = createVad();
+              hands.current = armed();
+            } catch {
+              capture.current = null;
+            }
+            setPhase("talk");
+          }}
+        >
           {name}
         </button>
         <p>I am a computer helper.</p>
@@ -122,7 +242,7 @@ export function App() {
     <main className="talk">
       <button
         type="button"
-        className="hold-corner"
+        className={videoId ? "hold-corner hold-left" : "hold-corner"}
         aria-label="parent corner"
         onPointerDown={() => {
           holdStarted.current = Date.now();
@@ -148,6 +268,9 @@ export function App() {
         </div>
       ) : null}
       <p className="transcript">{transcript}</p>
+      <p className="status" role="status">
+        {status}
+      </p>
       {offline ? (
         <section aria-label="offline apps">
           <p>The tutor is resting.</p>
@@ -158,9 +281,6 @@ export function App() {
           ))}
         </section>
       ) : null}
-      <button type="button" className="talk-button" aria-label="talk" onClick={toggleTalk}>
-        {listening ? "Stop" : "Talk"}
-      </button>
       <button type="button" className="home-button" onClick={() => send({ type: "home" })}>
         Home
       </button>
@@ -175,7 +295,15 @@ export function App() {
           <button type="submit">Send</button>
         </form>
       ) : null}
-      {videoId ? <VideoOverlay videoId={videoId} onDone={() => { setVideoId(""); send({ type: "video_ui", action: "done" }); }} /> : null}
+      {videoId ? (
+        <VideoOverlay
+          videoId={videoId}
+          onClose={() => {
+            setVideoId("");
+            send({ type: "video_ui", action: "done" });
+          }}
+        />
+      ) : null}
       {unlock ? <ParentUnlock token={token} /> : null}
     </main>
   );

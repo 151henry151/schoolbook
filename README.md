@@ -34,7 +34,7 @@ cd e2e && npm ci && npx playwright test
 
 ## Run the kiosk
 
-Install `cage` and Chromium (`sudo apt install cage chromium` on Debian). Build the UIs once, then start everything with one command:
+Install `cage`, Chromium, and espeak-ng (`sudo apt install cage chromium espeak-ng` on Debian). Build the UIs once, then start everything with one command:
 
 ```bash
 (cd ui && npm ci && npm run build)
@@ -45,7 +45,7 @@ uv run schoolbook --parent-password 'choose-a-parent-password'
 
 That starts the daemon and opens Chromium inside cage. Hold the top-right corner for five seconds, enter the parent password, and choose **End session** to leave. Later runs can omit `--parent-password` if the runtime under `~/.local/share/schoolbook` already exists.
 
-Speech-to-text is still the fake provider, so the developer text box is on by default. Pass `--no-dev` to hide it. On an existing desktop, cage runs nested and the host compositor may still allow Super or Alt-Tab; run `schoolbook` from a TTY for a full lock.
+After the avatar tap, the microphone stays on. Speak, pause, and the tutor answers out loud. It does not show written menus. The tutor finishes a sentence before it listens again. When the child asks for a video, the tutor searches YouTube, vets a candidate, and plays it; it does not ask for a video ID. Set `OPENAI_API_KEY` in a gitignored `.env` for live speech-to-speech (OpenAI Realtime). Video search also needs `YOUTUBE_API_KEY`. Claude's consumer voice mode cannot be embedded; typed `--dev` turns can still use `ANTHROPIC_API_KEY`. On an existing desktop, Schoolbook skips cage and opens Chromium `--kiosk` directly; Super or Alt-Tab may still reach other apps. Run from a TTY for a full lock.
 
 `schoolbookd --config` still serves only the HTTP API if you need that without cage.
 

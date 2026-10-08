@@ -9,14 +9,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- OpenAI Realtime speech-to-speech live talk when `OPENAI_API_KEY` is set
+- Connect to the GA Realtime API without the retired beta header
+- Keep live replies on OpenAI speech and skip written choice menus for a child who cannot read yet
+- Search and vet YouTube videos from live talk, then play only IDs that passed vetting
+- Hands-free live talk: the microphone stays open, 1.5s of silence ends a turn, and speech interrupts the tutor
+- AudioWorklet capture of 16 kHz PCM, a playback queue that drops cancelled turns, and Chromium mic auto-grant in kiosk
+- Whisper STT via faster-whisper and espeak-ng TTS, used by default instead of fake providers
 - `schoolbook` command that starts the daemon and a cage Chromium kiosk from one binary
+- Launcher loads a gitignored `.env` for API keys without overwriting the process environment
+- Kiosk launch falls back to Chromium without cage when the compositor is missing
+- Cage uses the X11 backend on Xorg sessions instead of a missing Wayland nest
+- Desktop X11/Wayland sessions skip nested cage and start Chromium kiosk directly
 - Session-agent `kiosk` mode that launches localhost Chromium `--kiosk` and restarts it after a crash
 - Parent End session writes a kiosk exit flag so cage returns to the previous session
 
 ### Changed
 
+- Hold the child's next turn until the tutor finishes speaking
+- Change the default learner first name from Sam to Arum
+- Resume capture audio from the avatar tap, fall back if AudioWorklet fails, and show a microphone error
+- End a live turn after 1.5s of mostly-quiet audio and ignore leftover noise while the tutor is thinking
+- Detect voice with RMS hysteresis instead of a low peak threshold
 - Child unlock dialog sends the boot token and shows an End session action after a correct password
 - Chromium policy allowlist includes the parent console on `127.0.0.1:8766`
+- Speak about videos in everyday words and do not call them safe or vetted
+- Start videos automatically and hide the written play, pause, and done buttons
+- Mute the tutor microphone while a video plays, tap the picture to pause or resume, and close it with a red X
 
 ## [0.9.0] - 2026-10-07
 

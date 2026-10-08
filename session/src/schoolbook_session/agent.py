@@ -42,6 +42,7 @@ def chromium_kiosk_argv(url: str, binary: str = "chromium") -> list[str]:
         "--disable-infobars",
         "--password-store=basic",
         "--autoplay-policy=no-user-gesture-required",
+        "--use-fake-ui-for-media-stream",
         url,
     ]
 

@@ -92,6 +92,8 @@ class HelloOk(BaseModel):
     type: Literal["hello_ok"] = "hello_ok"
     protocol_major: int
     learner_name: str
+    talk_mode: str = "handsfree"
+    voice: str = "pipeline"
 
 
 class Transcript(BaseModel):

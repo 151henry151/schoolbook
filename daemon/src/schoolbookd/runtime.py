@@ -190,6 +190,12 @@ class Runtime:
 
         return render_age_profile(self.age_profile)
 
+    def run_tool(self, live: LiveState, name: str, args: dict[str, object]) -> dict[str, object]:
+        decision = ToolPolicy().check(name, args, self.policy_context(live))
+        if not decision.allowed:
+            return {"error": decision.reason}
+        return self._execute(live, name, args)
+
     def _execute(self, live: LiveState, name: str, args: dict[str, object]) -> dict[str, object]:
         if name == "show_board":
             live.screen = "board"

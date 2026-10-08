@@ -226,7 +226,7 @@ def nocookie_embed(video_id: str) -> str:
         raise ValueError("video id must be a YouTube id")
     return (
         "https://www.youtube-nocookie.com/embed/"
-        f"{video_id}?rel=0&controls=0&modestbranding=1&iv_load_policy=3"
+        f"{video_id}?rel=0&controls=0&modestbranding=1&iv_load_policy=3&autoplay=1"
     )
 
 

@@ -2,7 +2,7 @@ id: age-6
 max_sentences_per_turn: 3
 max_words_per_sentence: 12
 target_reading_grade: 1
-talk_mode_default: tap
+talk_mode_default: handsfree
 break_suggestions: gentle
 video_duration_minutes: [1, 30]
 video_stretch_steps: 1

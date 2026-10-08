@@ -106,6 +106,21 @@ def test_parent_login_lists_the_session(tmp_path: Path) -> None:
     assert "Sam" in exported.json()["markdown"]
 
 
+def test_talk_start_cancels_the_speaking_turn(tmp_path: Path) -> None:
+    host = _host(tmp_path)
+    host.speaking_turn = "old"
+    host.begin_talk("new")
+    assert "old" in host.cancelled_turns
+    assert host.speaking_turn is None
+
+
+def test_finish_talk_returns_to_listening(tmp_path: Path) -> None:
+    host = _host(tmp_path)
+    host.begin_talk("t1")
+    messages = host.finish_talk("t1")
+    assert messages[-1] == {"type": "state", "name": "listening", "detail": ""}
+
+
 def test_talk_end_without_audio_skips_the_model(tmp_path: Path) -> None:
     host = _host(tmp_path)
     client = TestClient(child_app(host))

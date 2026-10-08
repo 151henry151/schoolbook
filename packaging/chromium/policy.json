@@ -14,6 +14,7 @@
     "https://s.ytimg.com",
     "https://s.ytimg.com/*"
   ],
+  "AudioCaptureAllowed": true,
   "DeveloperToolsAvailability": 2,
   "IncognitoModeAvailability": 1,
   "DownloadRestrictions": 3,

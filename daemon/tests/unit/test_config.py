@@ -6,7 +6,7 @@ from pathlib import Path
 import pytest
 
 from schoolbookd.__main__ import main
-from schoolbookd.config import ConfigError, load_config
+from schoolbookd.config import ConfigError, Secrets, explain_startup, load_config
 
 
 def _write_tree(root: Path) -> Path:
@@ -74,3 +74,13 @@ def test_relative_paths_resolve_against_the_config_file(tmp_path: Path) -> None:
     config.write_text(text, encoding="utf-8")
     loaded = load_config(config)
     assert loaded.data_dir == (tmp_path / "data").resolve()
+
+
+def test_realtime_voice_requires_an_openai_key(tmp_path: Path) -> None:
+    config = load_config(_write_tree(tmp_path))
+    config.providers.voice = "realtime"
+    errors = explain_startup(
+        config,
+        Secrets(parent_password_hash="x", console_session_secret="y"),
+    )
+    assert any("OPENAI_API_KEY" in item for item in errors)

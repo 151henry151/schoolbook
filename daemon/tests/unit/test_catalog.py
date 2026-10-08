@@ -102,3 +102,4 @@ def test_embed_uses_the_nocookie_domain() -> None:
     assert url.startswith("https://www.youtube-nocookie.com/embed/abcdefghijk")
     assert "rel=0" in url
     assert "controls=0" in url
+    assert "autoplay=1" in url

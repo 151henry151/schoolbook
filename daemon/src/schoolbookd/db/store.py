@@ -61,7 +61,7 @@ class Store:
         age_profile: str = "age-6",
         avatar: str = "star",
         voice: str = "piper-warm",
-        talk_mode: str = "tap",
+        talk_mode: str = "handsfree",
     ) -> None:
         with self.session() as db:
             row = db.get(Learner, learner_id)

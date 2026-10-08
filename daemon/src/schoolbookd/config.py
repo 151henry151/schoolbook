@@ -24,7 +24,8 @@ class ProvidersConfig(BaseModel):
     model_config = ConfigDict(extra="forbid")
     stt: Literal["fake", "whisper", "deepgram", "assemblyai", "elevenlabs", "openai"] = "fake"
     llm: Literal["fake", "anthropic"] = "fake"
-    tts: Literal["fake", "piper", "elevenlabs", "cartesia", "openai"] = "fake"
+    tts: Literal["fake", "piper", "elevenlabs", "cartesia", "openai", "espeak"] = "fake"
+    voice: Literal["pipeline", "realtime"] = "pipeline"
     classifier: bool = False
 
 
@@ -195,6 +196,8 @@ def explain_startup(config: SchoolbookConfig, secrets: Secrets) -> list[str]:
         errors.append("PARENT_PASSWORD_HASH is empty; the parent console cannot be unlocked")
     if not secrets.console_session_secret:
         errors.append("CONSOLE_SESSION_SECRET is empty")
+    if config.providers.voice == "realtime" and not secrets.openai_api_key:
+        errors.append("providers.voice is realtime but OPENAI_API_KEY is empty")
     return errors
 
 

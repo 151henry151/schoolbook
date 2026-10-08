@@ -83,6 +83,8 @@ def build_host(config: SchoolbookConfig, secrets: Secrets) -> Host:
         secrets_path=config.secrets_file,
         backup_repository=config.backup.restic_repository,
         data_dir=config.data_dir,
+        voice=config.providers.voice,
+        openai_api_key=secrets.openai_api_key,
     )
 
 
@@ -104,7 +106,7 @@ def _ensure_learner(store: Store, path: Path) -> None:
         age_profile=str(raw.get("age_profile", "age-6")),
         avatar=str(raw.get("avatar", "star")),
         voice=str(raw.get("voice", "piper-warm")),
-        talk_mode=str(raw.get("talk_mode", "tap")),
+        talk_mode=str(raw.get("talk_mode", "handsfree")),
     )
 
 
@@ -129,6 +131,10 @@ def _tts(config: SchoolbookConfig) -> TTSProvider:
         from schoolbookd.providers.piper import PiperTTS
 
         return PiperTTS()
+    if config.providers.tts == "espeak":
+        from schoolbookd.providers.espeak import EspeakTTS
+
+        return EspeakTTS()
     return FakeTTS()
 
 

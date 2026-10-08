@@ -36,6 +36,7 @@ def test_launch_keeps_the_daemon_argv() -> None:
 def test_chromium_stays_on_localhost() -> None:
     argv = chromium_kiosk_argv("http://127.0.0.1:8765/")
     assert "--kiosk" in argv
+    assert "--use-fake-ui-for-media-stream" in argv
     assert "-s" not in argv
     with pytest.raises(LaunchDenied):
         chromium_kiosk_argv("https://example.com")

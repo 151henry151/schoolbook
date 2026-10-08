@@ -19,7 +19,16 @@ export function embedUrl(videoId: string): string {
   if (!ID.test(videoId)) {
     throw new Error("video id must stay a YouTube id");
   }
-  return `https://www.youtube-nocookie.com/embed/${videoId}?rel=0&controls=0&modestbranding=1&iv_load_policy=3`;
+  return `https://www.youtube-nocookie.com/embed/${videoId}?rel=0&controls=0&modestbranding=1&iv_load_policy=3&autoplay=1&enablejsapi=1`;
+}
+
+export type PlayerTarget = {
+  postMessage: (message: string, origin: string) => void;
+};
+
+export function playerCommand(target: PlayerTarget | null | undefined, func: "playVideo" | "pauseVideo"): void {
+  if (!target) return;
+  target.postMessage(JSON.stringify({ event: "command", func, args: [] }), "https://www.youtube-nocookie.com");
 }
 
 export const OFFLINE_APPS = ["GCompris", "Tux Paint", "KTurtle", "Stellarium", "Marble"];

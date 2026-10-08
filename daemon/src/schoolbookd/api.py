@@ -5,10 +5,12 @@
 
 from __future__ import annotations
 
+import asyncio
 import base64
 import hashlib
 import hmac
 import json
+import sys
 import time
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
@@ -39,6 +41,7 @@ from schoolbookd.db.models import (
 )
 from schoolbookd.policy.unlock import UnlockState, attempt_unlock, hash_password
 from schoolbookd.providers.base import STTProvider
+from schoolbookd.providers.openai_realtime import REALTIME_TOOLS, RealtimeTalk, spoken_child_instructions
 from schoolbookd.runtime import LiveState, Runtime
 from schoolbookd.secrets_file import upsert_secrets
 from schoolbookd.tutor.loop import TurnOutcome
@@ -93,6 +96,8 @@ class Host:
     secrets_path: Path | None = None
     backup_repository: str | None = None
     data_dir: Path | None = None
+    voice: str = "pipeline"
+    openai_api_key: str = ""
 
     def request_kiosk_end(self) -> None:
         if self.data_dir is None:
@@ -145,8 +150,14 @@ class Host:
             return [{"type": "state", "name": "listening", "detail": "interrupted"}]
         self.speaking_turn = turn_id
         messages = _ws_messages(outcome, turn_id)
+        if text.strip():
+            messages.insert(
+                0,
+                {"type": "transcript", "turn_id": turn_id, "role": "child", "text": text, "partial": False},
+            )
         if outcome.sentences == ["The tutor is resting."]:
             messages.insert(0, {"type": "state", "name": "offline", "detail": "apps"})
+        rate = int(getattr(self.runtime.tts, "sample_rate", 16000))
         for seq, pcm in enumerate(sentence_audio(self.runtime.tts, outcome.sentences)):
             if turn_id in self.cancelled_turns:
                 break
@@ -156,11 +167,39 @@ class Host:
                     "turn_id": turn_id,
                     "seq": seq,
                     "pcm_b64": encode_audio(pcm),
-                    "sample_rate": 16000,
+                    "sample_rate": rate,
                 }
             )
         self.speaking_turn = None
+        messages.append({"type": "state", "name": "listening", "detail": ""})
         return messages
+
+    def make_realtime(self) -> RealtimeTalk:
+        from schoolbookd.tutor.prompts import render_age_profile
+
+        learner = self.runtime.store.learner(self.learner_id)
+        name = learner.first_name if learner else "friend"
+        instructions = spoken_child_instructions(
+            self.runtime.core_prompt,
+            render_age_profile(self.runtime.age_profile),
+            name,
+        )
+
+        def execute(tool: str, args: dict[str, object]) -> dict[str, object]:
+            return self.runtime.run_tool(self.ensure_live(), tool, args)
+
+        return RealtimeTalk(
+            api_key=self.openai_api_key,
+            instructions=instructions,
+            execute=execute,
+            tools=list(REALTIME_TOOLS),
+        )
+
+    def note_transcript(self, role: str, text: str) -> None:
+        if not text.strip():
+            return
+        live = self.ensure_live()
+        self.runtime.store.add_turn(live.session_id, role, text)
 
 
 def _as_datetime(stamp: float) -> datetime:
@@ -233,48 +272,105 @@ def child_app(host: Host) -> FastAPI:
             return
         learner = host.runtime.store.learner(host.learner_id)
         name = learner.first_name if learner else ""
-        await socket.send_json({"type": "hello_ok", "protocol_major": MAJOR, "learner_name": name})
-        while True:
+        talk_mode = learner.talk_mode if learner else "handsfree"
+        await socket.send_json(
+            {
+                "type": "hello_ok",
+                "protocol_major": MAJOR,
+                "learner_name": name,
+                "talk_mode": talk_mode,
+                "voice": host.voice,
+            }
+        )
+        talk: RealtimeTalk | None = None
+        pump: asyncio.Task[None] | None = None
+        if host.voice == "realtime" and host.openai_api_key:
+            talk = host.make_realtime()
+
+            async def emit(message: dict[str, object]) -> None:
+                if message.get("type") == "transcript":
+                    host.note_transcript(str(message.get("role", "tutor")), str(message.get("text", "")))
+                await socket.send_json(message)
+
             try:
-                incoming = parse_client_message(await socket.receive_json())
-            except WebSocketDisconnect:
-                break
-            if incoming.type == "ping":
-                await socket.send_json({"type": "pong"})
-            elif incoming.type == "dev_text" and host.dev_text:
-                outcome = host.runtime.child_turn(host.ensure_live(), incoming.text)
-                for message in _ws_messages(outcome, incoming.turn_id):
-                    await socket.send_json(message)
-            elif incoming.type == "talk_start":
-                host.begin_talk(incoming.turn_id)
-                await socket.send_json({"type": "state", "name": "listening", "detail": ""})
-            elif incoming.type == "audio_frame":
-                host.add_audio(incoming.turn_id, incoming.pcm_b64)
-            elif incoming.type == "talk_end":
-                for message in host.finish_talk(incoming.turn_id):
-                    await socket.send_json(message)
-            elif incoming.type == "choice":
-                outcome = host.runtime.child_turn(host.ensure_live(), f"I choose {incoming.option_id}")
-                for message in _ws_messages(outcome, incoming.turn_id):
-                    await socket.send_json(message)
-            elif incoming.type == "home":
-                live = host.ensure_live()
-                live.screen = "home"
-                live.playing_video = None
-                await socket.send_json({"type": "state", "name": "home", "detail": ""})
-            elif incoming.type == "unlock_gesture":
-                await socket.send_json({"type": "state", "name": "parent_unlock", "detail": ""})
-            elif incoming.type == "video_ui":
-                await socket.send_json(
-                    {
-                        "type": "video",
-                        "action": "stop" if incoming.action == "done" else incoming.action,
-                        "video_id": "",
-                        "start_s": None,
-                        "end_s": None,
-                        "at_s": None,
-                    }
-                )
+                await talk.start()
+                pump = asyncio.create_task(talk.pump(emit))
+                print("schoolbook: OpenAI Realtime session is live.", file=sys.stderr)
+            except Exception as exc:
+                print(f"schoolbook: OpenAI Realtime failed ({exc}); retrying.", file=sys.stderr)
+                try:
+                    await talk.start()
+                    pump = asyncio.create_task(talk.pump(emit))
+                    print("schoolbook: OpenAI Realtime session is live.", file=sys.stderr)
+                except Exception as retry_exc:
+                    talk = None
+                    print(f"schoolbook: OpenAI Realtime still down ({retry_exc}).", file=sys.stderr)
+        try:
+            while True:
+                try:
+                    incoming = parse_client_message(await socket.receive_json())
+                except WebSocketDisconnect:
+                    break
+                if incoming.type == "ping":
+                    await socket.send_json({"type": "pong"})
+                elif incoming.type == "dev_text" and host.dev_text:
+                    outcome = host.runtime.child_turn(host.ensure_live(), incoming.text)
+                    for message in _ws_messages(outcome, incoming.turn_id):
+                        await socket.send_json(message)
+                elif incoming.type == "talk_start":
+                    if talk is None and host.voice != "realtime":
+                        host.begin_talk(incoming.turn_id)
+                        await socket.send_json({"type": "state", "name": "listening", "detail": ""})
+                elif incoming.type == "audio_frame":
+                    if talk is not None:
+                        pcm = base64.b64decode(incoming.pcm_b64)
+                        await talk.append_pcm16(pcm, incoming.sample_rate)
+                    elif host.voice != "realtime":
+                        host.add_audio(incoming.turn_id, incoming.pcm_b64)
+                elif incoming.type == "talk_end":
+                    if talk is not None or host.voice == "realtime":
+                        continue
+                    turn_id = incoming.turn_id
+
+                    async def emit_turn(done_id: str = turn_id) -> None:
+                        messages = await asyncio.to_thread(host.finish_talk, done_id)
+                        for message in messages:
+                            if done_id in host.cancelled_turns:
+                                break
+                            await socket.send_json(message)
+
+                    asyncio.create_task(emit_turn())
+                elif incoming.type == "choice":
+                    outcome = host.runtime.child_turn(host.ensure_live(), f"I choose {incoming.option_id}")
+                    for message in _ws_messages(outcome, incoming.turn_id):
+                        await socket.send_json(message)
+                elif incoming.type == "home":
+                    live = host.ensure_live()
+                    live.screen = "home"
+                    live.playing_video = None
+                    await socket.send_json({"type": "state", "name": "home", "detail": ""})
+                elif incoming.type == "unlock_gesture":
+                    await socket.send_json({"type": "state", "name": "parent_unlock", "detail": ""})
+                elif incoming.type == "video_ui":
+                    live = host.ensure_live()
+                    if incoming.action == "done":
+                        live.playing_video = None
+                        live.screen = "home"
+                    await socket.send_json(
+                        {
+                            "type": "video",
+                            "action": "stop" if incoming.action == "done" else incoming.action,
+                            "video_id": "",
+                            "start_s": None,
+                            "end_s": None,
+                            "at_s": None,
+                        }
+                    )
+        finally:
+            if pump is not None:
+                pump.cancel()
+            if talk is not None:
+                await talk.close()
 
     return app
 

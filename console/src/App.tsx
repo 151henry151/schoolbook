@@ -232,7 +232,7 @@ function LearnerView({ data, onSaved }: { data: unknown; onSaved: () => void }) 
         void fetch("/api/learner", {
           method: "PATCH",
           headers: { "content-type": "application/json" },
-          body: JSON.stringify({ first_name: name, talk_mode: learner.talk_mode || "tap" }),
+          body: JSON.stringify({ first_name: name, talk_mode: learner.talk_mode || "handsfree" }),
         }).then(onSaved);
       }}
     >
