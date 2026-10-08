@@ -10,8 +10,9 @@ import { PlaybackQueue, decodePcm16, webAudioPlayer } from "./playback";
 import { createVad, encodePcm16 } from "./pcm";
 import { PROTOCOL_MAJOR, type BoardElement } from "./protocol";
 import { ParentUnlock } from "./unlock";
-import { TalkLines, nextTalkPair, spokenWordIndex, type TalkPair } from "./talkLines";
+import { TalkLines, nextTalkPair, playbackWordIndex, type TalkPair } from "./talkLines";
 import { PictureOverlay } from "./picture";
+import { TalkStatus, type TalkStatusKind } from "./talkStatus";
 import { VideoOverlay } from "./video";
 
 type Phase = "home" | "talk";
@@ -30,6 +31,10 @@ export function App() {
   const [choices, setChoices] = useState<Choice[]>([]);
   const [videoId, setVideoId] = useState("");
   const [videoPaused, setVideoPaused] = useState(false);
+  const [videoAudioOnly, setVideoAudioOnly] = useState(false);
+  const pendingAudioOnly = useRef(false);
+  const [appId, setAppId] = useState("");
+  const appIdRef = useRef("");
   const [pictureId, setPictureId] = useState("");
   const [pictureLoading, setPictureLoading] = useState(false);
   const pictureLoadingRef = useRef(false);
@@ -38,7 +43,7 @@ export function App() {
   const [token, setToken] = useState("");
   const [draft, setDraft] = useState("");
   const [socket, setSocket] = useState<WebSocket | null>(null);
-  const [status, setStatus] = useState("Listening");
+  const [status, setStatus] = useState<TalkStatusKind>("listening");
   const [listenPaused, setListenPaused] = useState(false);
   const listenPausedRef = useRef(false);
   const [voice, setVoice] = useState("pipeline");
@@ -68,7 +73,7 @@ export function App() {
 
   useEffect(() => {
     queue.current.setProgress((elapsed, duration) => {
-      setSpokenIndex(spokenWordIndex(talkRef.current.tutor, elapsed, duration));
+      setSpokenIndex(playbackWordIndex(talkRef.current.tutor, elapsed, duration));
     });
     return () => queue.current.setProgress(null);
   }, []);
@@ -93,10 +98,12 @@ export function App() {
           turn_id?: string;
           elements?: BoardElement[];
           video_id?: string;
+          app_id?: string;
           action?: string;
           image_id?: string;
           loading?: boolean;
           error?: boolean;
+          audio_only?: boolean;
           partial?: boolean;
           name?: string;
           options?: Choice[];
@@ -115,13 +122,13 @@ export function App() {
           setTalk((current) => nextTalkPair(current, message.role ?? "", message.text ?? ""));
           if (message.role === "tutor") {
             speaking.current = true;
-            setStatus("Talking");
+            setStatus("talking");
           }
         }
         if (message.type === "audio_chunk" && message.turn_id && message.pcm_b64) {
-          if (freshListen.current) return;
+          if (freshListen.current || appIdRef.current) return;
           speaking.current = true;
-          setStatus("Talking");
+          setStatus("talking");
           const pcm = decodePcm16(message.pcm_b64);
           if (typeof speechSynthesis !== "undefined") speechSynthesis.cancel();
           if (pcm.length > 0) {
@@ -132,23 +139,39 @@ export function App() {
         if (message.type === "choices" && message.options && voiceRef.current !== "realtime") {
           setChoices(message.options);
         }
+        if (message.type === "launch" && message.app_id) {
+          appIdRef.current = message.app_id;
+          queue.current.interrupt();
+          speaking.current = false;
+          if (typeof speechSynthesis !== "undefined") speechSynthesis.cancel();
+          setAppId(message.app_id);
+          setStatus("listening");
+        }
+        if (message.type === "app" && message.action === "stop") {
+          appIdRef.current = "";
+          setAppId("");
+        }
         if (message.type === "video" && message.action === "play" && message.video_id) {
           pendingVideo.current = message.video_id;
+          pendingAudioOnly.current = Boolean(message.audio_only);
           void queue.current.whenIdle().then(() => {
             const ready = pendingVideo.current;
             if (!ready) return;
             pendingVideo.current = "";
             setPictureId("");
             setVideoPaused(false);
+            setVideoAudioOnly(pendingAudioOnly.current);
             setVideoId(ready);
           });
         }
         if (message.type === "video" && (message.action === "stop" || message.action === "destroy")) {
           pendingVideo.current = "";
+          pendingAudioOnly.current = false;
           setPictureId("");
           setPictureLoading(false);
           pictureLoadingRef.current = false;
           setVideoPaused(false);
+          setVideoAudioOnly(false);
           setVideoId("");
         }
         if (message.type === "video" && message.action === "resume") {
@@ -184,11 +207,11 @@ export function App() {
         if (message.type === "state" && message.name === "offline") setOffline(true);
         if (message.type === "state" && message.name === "home") setOffline(false);
         if (message.type === "state" && message.name === "parent_unlock") setUnlock(true);
-        if (message.type === "state" && message.name === "thinking") setStatus("Thinking");
+        if (message.type === "state" && message.name === "thinking") setStatus("thinking");
         if (message.type === "state" && message.name === "speaking") {
           if (freshListen.current || listenPausedRef.current) return;
           speaking.current = true;
-          setStatus("Talking");
+          setStatus("talking");
         }
         if (message.type === "state" && message.name === "listening") {
           if (listenPausedRef.current) return;
@@ -199,7 +222,7 @@ export function App() {
               freshListen.current = false;
               setSpokenIndex(-1);
             }
-            setStatus(message.detail === "hearing" ? "I hear you" : "Listening");
+            setStatus("listening");
           };
           if (message.detail === "hearing") {
             finish();
@@ -220,7 +243,7 @@ export function App() {
   }, []);
 
   useEffect(() => {
-    if (phase !== "talk" || listenPaused || (videoId && !videoPaused)) return;
+    if (phase !== "talk" || listenPaused || (videoId && !videoPaused) || appId) return;
     let stop: (() => void) | undefined;
     void startMic((pcm, dtMs) => {
       const ws = socketRef.current;
@@ -255,10 +278,10 @@ export function App() {
           speaking.current = false;
         }
         ws.send(JSON.stringify({ type: "talk_start", turn_id: event.turnId }));
-        setStatus("I hear you");
+        setStatus("listening");
       }
       if (event.type === "start" || event.type === "interrupt" || event.type === "frame") {
-        if (event.type === "frame") setStatus(hearing ? "I hear you" : "Listening");
+        if (event.type === "frame") setStatus("listening");
         ws.send(
           JSON.stringify({
             type: "audio_frame",
@@ -271,7 +294,7 @@ export function App() {
         seq.current += 1;
       }
       if (event.type === "end") {
-        setStatus("Thinking");
+        setStatus("thinking");
         ws.send(JSON.stringify({ type: "talk_end", turn_id: event.turnId }));
       }
     }, capture.current ?? undefined)
@@ -279,10 +302,10 @@ export function App() {
         stop = value;
       })
       .catch(() => {
-        setStatus("I cannot hear the microphone");
+        setStatus("mic-error");
       });
     return () => stop?.();
-  }, [phase, voice, videoId, videoPaused, listenPaused]);
+  }, [phase, voice, videoId, videoPaused, listenPaused, appId]);
 
   function send(message: object) {
     socket?.send(JSON.stringify(message));
@@ -300,14 +323,14 @@ export function App() {
     listenPausedRef.current = false;
     setListenPaused(false);
     setSpokenIndex(-1);
-    setStatus("Listening");
+    setStatus("listening");
     send({ type: "talk_start", turn_id: crypto.randomUUID() });
   }
 
   function pauseListen() {
     listenPausedRef.current = true;
     setListenPaused(true);
-    setStatus("Paused");
+    setStatus("paused");
     send({ type: "talk_start", turn_id: crypto.randomUUID() });
   }
 
@@ -356,7 +379,7 @@ export function App() {
     <main className="talk">
       <button
         type="button"
-        className={videoId ? "hold-corner hold-left" : "hold-corner"}
+        className={videoId || appId ? "hold-corner hold-left" : "hold-corner"}
         aria-label="parent corner"
         onPointerDown={() => {
           holdStarted.current = Date.now();
@@ -389,11 +412,6 @@ export function App() {
         overVideo={Boolean(videoId && videoPaused)}
         hidden={Boolean(pictureId || pictureLoading)}
       />
-      {pictureId || pictureLoading ? null : (
-        <p className={videoId && videoPaused ? "status on-video" : "status"} role="status">
-          {status}
-        </p>
-      )}
       {offline ? (
         <section aria-label="offline apps">
           <p>The tutor is resting.</p>
@@ -404,12 +422,7 @@ export function App() {
           ))}
         </section>
       ) : null}
-      {pictureId || pictureLoading ? null : (
-        <button type="button" className="home-button" onClick={() => send({ type: "home" })}>
-          Home
-        </button>
-      )}
-      {!(videoId && !videoPaused) ? (
+      {!(videoId && !videoPaused) && !appId ? (
         <div
           className={
             (videoId && videoPaused) || pictureId || pictureLoading
@@ -443,7 +456,9 @@ export function App() {
                 <rect x="38" y="8" width="12" height="48" rx="4" fill="#e07a3d" />
               </svg>
             </div>
-          ) : null}
+          ) : (
+            <TalkStatus kind={status} overVideo={Boolean(videoId && videoPaused)} />
+          )}
           <button type="button" className="stop-button" aria-label="stop" onClick={pauseListen}>
             <svg viewBox="0 0 64 64" aria-hidden="true">
               <polygon
@@ -489,16 +504,34 @@ export function App() {
           }}
         />
       ) : null}
+      {appId ? (
+        <div className="app-overlay">
+          <button
+            type="button"
+            className="video-close"
+            aria-label="close game"
+            onClick={() => {
+              appIdRef.current = "";
+              setAppId("");
+              send({ type: "app_ui", action: "done" });
+            }}
+          >
+            ×
+          </button>
+        </div>
+      ) : null}
       {videoId ? (
         <VideoOverlay
           videoId={videoId}
           paused={videoPaused}
+          audioOnly={videoAudioOnly}
           hidden={Boolean(pictureId || pictureLoading)}
           onClose={() => {
             pictureLoadingRef.current = false;
             setPictureLoading(false);
             setPictureId("");
             setVideoPaused(false);
+            setVideoAudioOnly(false);
             setVideoId("");
             send({ type: "video_ui", action: "done" });
           }}

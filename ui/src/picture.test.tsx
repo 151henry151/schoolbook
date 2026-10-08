@@ -25,4 +25,5 @@ test("the picture sits in a frame that leaves room for the talk buttons", () => 
   expect(overlay.className).toContain("above-controls");
   const image = screen.getByRole("img", { name: "pterodactyl" });
   expect(image.closest(".picture-frame")).toBeTruthy();
+  expect(image.className).toContain("picture-fit");
 });

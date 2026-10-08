@@ -39,6 +39,7 @@ _LINES = [
     '  | { type: "board_tap"; turn_id: string;',
     "      element_index: number; index: number }",
     '  | { type: "video_ui"; action: "pause" | "resume" | "done" }',
+    '  | { type: "app_ui"; action: "done" }',
     '  | { type: "unlock_gesture" }',
     '  | { type: "ping" };',
     "",

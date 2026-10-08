@@ -27,6 +27,15 @@ class LaunchError(RuntimeError):
     pass
 
 
+def install_app_manifests(share: Path, apps_dir: Path) -> None:
+    apps_dir.mkdir(parents=True, exist_ok=True)
+    manifests = list((share / "apps.d").glob("*.yaml"))
+    if not manifests:
+        raise LaunchError(f"no app manifests in {share / 'apps.d'}")
+    for manifest in manifests:
+        shutil.copy(manifest, apps_dir / manifest.name)
+
+
 @dataclass(frozen=True)
 class KioskPlan:
     daemon_cmd: list[str]
@@ -56,13 +65,8 @@ def prepare_runtime(root: Path, share: Path, parent_password: str) -> Path:
     etc = root / "etc"
     data = root / "data"
     apps = etc / "apps.d"
-    apps.mkdir(parents=True, exist_ok=True)
     data.mkdir(parents=True, exist_ok=True)
-    manifests = list((share / "apps.d").glob("*.yaml"))
-    if not manifests:
-        raise LaunchError(f"no app manifests in {share / 'apps.d'}")
-    for manifest in manifests:
-        shutil.copy(manifest, apps / manifest.name)
+    install_app_manifests(share, apps)
     shutil.copy(share / "packaging" / "output-check.txt", etc / "output-check.txt")
     learner = etc / "learner.yaml"
     if not learner.is_file():
@@ -274,6 +278,7 @@ def main(argv: list[str] | None = None) -> int:
             else:
                 _upgrade_voice_providers(config_path)
                 upgrade_default_learner(runtime / "etc" / "learner.yaml")
+                install_app_manifests(share, runtime / "etc" / "apps.d")
         config = load_config(config_path)
         errors = check_config(config)
         if errors:

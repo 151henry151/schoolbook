@@ -68,6 +68,65 @@ _STRETCH_BOOST = (
 )
 
 
+_EXPLICIT_MARKERS = (
+    "explicit",
+    "uncensored",
+    "dirty version",
+    "uncut",
+    "nsfw",
+)
+
+_CLEAN_AUDIO_BOOST = (
+    ("official audio", 8),
+    ("clean", 10),
+    ("radio edit", 8),
+    ("lyrics", 3),
+)
+
+_MUSIC_VIDEO_PENALTY = (
+    ("official video", 6),
+    ("music video", 6),
+    ("official mv", 6),
+)
+
+
+def song_search_query(query: str) -> str:
+    topic = " ".join(query.split())
+    if not topic:
+        return topic
+    words = topic.split()[:8]
+    shaped = " ".join(words)
+    lowered = shaped.lower()
+    extra: list[str] = []
+    if "audio" not in lowered:
+        extra.append("audio")
+    return " ".join([shaped, *extra]).strip()
+
+
+def is_explicit_track(video: VideoCandidate) -> bool:
+    text = f"{video.title} {video.description}".lower()
+    return any(marker in text for marker in _EXPLICIT_MARKERS)
+
+
+def rank_for_clean_audio(videos: list[VideoCandidate]) -> list[VideoCandidate]:
+    def score(video: VideoCandidate) -> int:
+        text = f"{video.title} {video.channel_title} {video.description}".lower()
+        points = 0
+        if is_explicit_track(video):
+            points -= 8
+        if "topic" in video.channel_title.lower():
+            points += 4
+        for marker, value in _CLEAN_AUDIO_BOOST:
+            if marker in text:
+                points += value
+        for marker, value in _MUSIC_VIDEO_PENALTY:
+            if marker in text:
+                points -= value
+        return points
+
+    return sorted(videos, key=score, reverse=True)
+
+
 def educational_search_query(query: str) -> str:
     topic = " ".join(query.split())
     if not topic:
@@ -105,15 +164,20 @@ def hard_filter(
     rejected_ids: set[str],
     duration_minutes: tuple[int, int] = (1, 30),
     language: str = "en",
+    kind: str = "video",
 ) -> HardFilterResult:
     if video.video_id in rejected_ids:
         return HardFilterResult(False, "already rejected")
     if not video.embeddable:
         return HardFilterResult(False, "not embeddable")
-    if video.age_restricted:
-        return HardFilterResult(False, "age restricted")
     if video.live:
         return HardFilterResult(False, "live stream")
+    if video.channel_id in blocked_channels:
+        return HardFilterResult(False, "channel blocked")
+    if kind == "song":
+        return HardFilterResult(True, "ok")
+    if video.age_restricted:
+        return HardFilterResult(False, "age restricted")
     if video.short:
         return HardFilterResult(False, "short")
     if is_baby_content(video):
@@ -121,8 +185,6 @@ def hard_filter(
     low, high = duration_minutes
     if video.duration_s < low * 60 or video.duration_s > high * 60:
         return HardFilterResult(False, "duration outside the window")
-    if video.channel_id in blocked_channels:
-        return HardFilterResult(False, "channel blocked")
     if video.language != language:
         return HardFilterResult(False, "language does not match")
     return HardFilterResult(True, "ok")
@@ -135,6 +197,7 @@ def visible_to_tutor(
     rejected_ids: set[str],
     duration_minutes: tuple[int, int] = (1, 30),
     language: str = "en",
+    kind: str = "video",
 ) -> list[VideoCandidate]:
     kept: list[VideoCandidate] = []
     for video in videos:
@@ -144,6 +207,7 @@ def visible_to_tutor(
             rejected_ids=rejected_ids,
             duration_minutes=duration_minutes,
             language=language,
+            kind=kind,
         )
         if result.ok:
             kept.append(video)
@@ -209,6 +273,7 @@ def vet_video(
     rejected_ids: set[str],
     duration_minutes: tuple[int, int] = (1, 30),
     language: str = "en",
+    kind: str = "video",
 ) -> Verdict:
     hard = hard_filter(
         video,
@@ -216,7 +281,10 @@ def vet_video(
         rejected_ids=rejected_ids,
         duration_minutes=duration_minutes,
         language=language,
+        kind=kind,
     )
+    if hard.ok and kind == "song":
+        return Verdict("approved", "requested song audio", 1, "song")
     if not hard.ok:
         return Verdict("rejected", hard.reason, None, "hard")
     meta = metadata.review(video)

@@ -85,6 +85,8 @@ def test_play_video_requires_an_approved_unblocked_id() -> None:
     assert not policy.check("play_video", {"video_id": "notvetted1"}, _ctx()).allowed
     assert not policy.check("play_video", {"video_id": "blockedvideo"}, _ctx()).allowed
     assert policy.check("play_video", {"video_id": "abcdefghijk"}, _ctx()).allowed
+    assert policy.check("play_video", {"video_id": "abcdefghijk", "audio_only": True}, _ctx()).allowed
+    assert policy.check("search_videos", {"query": "astronaut in the ocean", "kind": "song"}, _ctx()).allowed
 
 
 def test_launch_app_uses_only_manifest_activities() -> None:

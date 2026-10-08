@@ -2,7 +2,13 @@
 // SPDX-FileCopyrightText: 2026 Schoolbook contributors
 
 import { render, screen } from "@testing-library/react";
-import { TalkLines, nextTalkPair, speakerInitial, spokenWordIndex } from "./talkLines";
+import {
+  TalkLines,
+  nextTalkPair,
+  playbackWordIndex,
+  speakerInitial,
+  spokenWordIndex,
+} from "./talkLines";
 
 test("a tutor reply keeps the child's words", () => {
   const afterChild = nextTalkPair({ child: "", tutor: "" }, "child", "Show me dinosaurs.");
@@ -16,6 +22,17 @@ test("spokenWordIndex follows elapsed playback", () => {
   expect(spokenWordIndex("one two three", 0, 3000)).toBe(0);
   expect(spokenWordIndex("one two three", 1500, 3000)).toBe(1);
   expect(spokenWordIndex("one two three", 2900, 3000)).toBe(2);
+});
+
+test("a short first audio chunk does not race through a long sentence", () => {
+  const text = "A cord of wood is a big neat stack about as long as a small car.";
+  expect(playbackWordIndex(text, 120, 200)).toBe(0);
+  expect(playbackWordIndex(text, 400, 400)).toBeLessThan(3);
+});
+
+test("a pause after a period keeps the highlight on that word longer", () => {
+  expect(spokenWordIndex("Hello. Next", 1200, 2000)).toBe(0);
+  expect(spokenWordIndex("Hello Next", 1200, 2000)).toBe(1);
 });
 
 test("the spoken tutor word is marked for read-along", () => {

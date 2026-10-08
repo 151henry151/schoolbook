@@ -6,6 +6,7 @@
 from __future__ import annotations
 
 import json
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
@@ -33,6 +34,7 @@ class LiveState:
     history: list[dict[str, object]] = field(default_factory=list)
     observations: list[str] = field(default_factory=list)
     playing_video: str | None = None
+    app_pid: int | None = None
     paused: bool = False
     screen: str = "home"
     last_video_pause_at: float | None = None
@@ -56,6 +58,11 @@ class Runtime:
     min_video_pause_s: float = 120
     pictures: PictureMaker | None = None
     images_dir: Path | None = None
+    launcher: Callable[[list[str]], int] | None = None
+    killer: Callable[[int], None] | None = None
+    overlay: Callable[[Callable[[], None]], Callable[[], None]] | None = None
+    on_app_exit: Callable[[], None] | None = None
+    _hide_overlay: Callable[[], None] | None = field(default=None, init=False, repr=False)
 
     def image_path(self, image_id: str) -> Path | None:
         if not image_id or "/" in image_id or ".." in image_id:
@@ -197,6 +204,56 @@ class Runtime:
     def speak(self, text: str) -> bytes:
         return self.tts.synthesize(text)
 
+    def start_app(self, argv: list[str]) -> int:
+        if self.launcher is None:
+            return 0
+        return int(self.launcher(argv))
+
+    def stop_app(self, live: LiveState, *, notify: bool = True) -> None:
+        pid = live.app_pid
+        hide = self._hide_overlay
+        if pid is None and hide is None:
+            return
+        live.app_pid = None
+        live.screen = "home"
+        self._hide_overlay = None
+        if pid is not None:
+            self.kill_app(pid)
+        if hide is not None:
+            hide()
+        if notify and self.on_app_exit is not None:
+            self.on_app_exit()
+
+    def kill_app(self, pid: int) -> None:
+        if self.killer is not None:
+            self.killer(pid)
+            return
+        import contextlib
+        import os
+        import signal
+
+        with contextlib.suppress(ProcessLookupError, PermissionError, OSError):
+            os.kill(pid, signal.SIGTERM)
+
+    def _gcompris_games(self, subject: str = "") -> list[dict[str, str]]:
+        needle = subject.strip().lower()
+        games: list[dict[str, str]] = []
+        for manifest in self.apps.values():
+            if manifest.id != "gcompris":
+                continue
+            for activity in manifest.activities:
+                haystack = " ".join([activity.id, activity.title, *activity.skills]).lower()
+                if needle and needle not in haystack:
+                    continue
+                games.append(
+                    {
+                        "app_id": manifest.id,
+                        "activity": activity.id,
+                        "title": activity.title,
+                    }
+                )
+        return games
+
     def end_from_parent(self, live: LiveState) -> None:
         self._finish(live, "parent", "The parent ended the session.")
 
@@ -312,9 +369,22 @@ class Runtime:
             activity_id = activity if isinstance(activity, str) else None
             argv = build_argv(manifest, activity_id)
             live.screen = "app"
-            return {"argv": argv, "app_id": manifest.id}
+            pid = self.start_app(argv)
+            live.app_pid = pid or None
+            if self.overlay is not None:
+                self._hide_overlay = self.overlay(lambda: self.stop_app(live))
+            return {
+                "argv": argv,
+                "app_id": manifest.id,
+                "activity": activity_id,
+                "pid": pid,
+            }
         if name == "list_apps":
-            return {"apps": sorted(self.apps)}
+            subject = str(args.get("subject") or "")
+            games = self._gcompris_games(subject)
+            if subject and not games:
+                games = self._gcompris_games("")
+            return {"apps": sorted(self.apps), "games": games}
         if name == "get_skill_status":
             profile = self.store.profile_input(live.learner_id)
             return {"practicing": profile.practicing, "review_due": profile.review_due}
@@ -325,7 +395,7 @@ class Runtime:
             if video is not None:
                 video.times_played += 1
                 self.store.save_video(video)
-            return {"playing": live.playing_video}
+            return {"playing": live.playing_video, "audio_only": bool(args.get("audio_only"))}
         if name == "video_control":
             action = str(args.get("action"))
             if action == "pause" and not pause_allowed(
@@ -349,15 +419,8 @@ class Runtime:
         if name == "search_videos":
             if self.catalog is None:
                 return {"candidates": []}
-            return {"candidates": self.catalog.search(str(args["query"]))}
-        if name == "switch_voice":
-            from schoolbookd.providers.openai_realtime import DEFAULT_TUTOR_VOICE, next_voice
-
-            current = self.store.get_setting("tutor_voice", DEFAULT_TUTOR_VOICE)
-            current_voice = current if isinstance(current, str) else DEFAULT_TUTOR_VOICE
-            voice = next_voice(current_voice, str(args.get("hint", "")))
-            self.store.put_setting("tutor_voice", voice, actor="tutor")
-            return {"voice": voice, "reconnect": True}
+            kind = str(args.get("kind") or "video")
+            return {"candidates": self.catalog.search(str(args["query"]), kind=kind)}
         if name == "set_tutor_name":
             from schoolbookd.providers.openai_realtime import normalize_tutor_name
 

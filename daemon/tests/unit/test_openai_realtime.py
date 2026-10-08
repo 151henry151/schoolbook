@@ -13,17 +13,21 @@ from schoolbookd.providers.openai_realtime import (
     clarify_speech_note,
     connect_headers,
     extract_child_speech,
+    game_play_briefing,
+    game_topic,
     looks_like_child_speech,
     looks_like_curious_question,
     looks_like_fantasy,
+    maybe_song_topic,
     paused_video_note,
-    picture_keep_talking,
     picture_making_line,
-    picture_shown_line,
     picture_wait_instructions,
     real_world_nudge,
     resample_pcm16,
     session_update,
+    song_confirm_briefing,
+    song_listen_briefing,
+    song_topic,
     spoken_child_instructions,
     spoken_clarify,
     video_watch_briefing,
@@ -157,6 +161,106 @@ def test_video_watch_briefing_asks_for_history_or_science() -> None:
     assert video_watch_briefing("I like cookies") is None
     assert video_watch_briefing("Can I learn about how deep a great white shark has to go?") is None
     assert video_watch_briefing("How deep do sharks go?") is None
+    assert video_watch_briefing("I want to hear Astronaut in the Ocean") is None
+
+
+def test_a_song_request_asks_for_clean_audio_only() -> None:
+    asked = "I want to hear Astronaut in the Ocean"
+    assert song_topic(asked) == "Astronaut in the Ocean"
+    assert song_topic("Play Astronaut in the Ocean") == "Astronaut in the Ocean"
+    assert song_topic("Play the song Baby Shark") == "Baby Shark"
+    assert song_topic("I want to hear about sharks") is None
+    assert song_topic("How deep do sharks go?") is None
+    assert song_topic("It can hear you. Do you sound a girl now or a boy?") is None
+    assert song_topic("Can you hear me?") is None
+    assert song_topic("I want to play a game") is None
+    assert song_topic("Play a game") is None
+    assert song_topic("Can I play GCompris") is None
+    assert song_topic("Play with me") is None
+    assert song_topic("I want to play") is None
+    assert song_topic("Play Happy") is None
+    assert maybe_song_topic("Play Happy") == "Happy"
+    assert maybe_song_topic("Play a game") is None
+    assert maybe_song_topic("I want to play a game") is None
+    assert maybe_song_topic("Play Astronaut in the Ocean") is None
+    note = song_listen_briefing(asked, name="Arum")
+    assert note is not None
+    lowered = note.lower()
+    assert "arum" in lowered
+    assert "astronaut in the ocean" in lowered
+    assert "okay, i'll play" in lowered
+    assert "do not say clean" in lowered or "do not say" in lowered and "clean" in lowered
+    assert "audio_only" in lowered or "audio only" in lowered
+    mapper = RealtimeMapper(child_name="Arum")
+    _ui, outbound = mapper.handle(
+        {
+            "type": "conversation.item.input_audio_transcription.completed",
+            "transcript": asked,
+        }
+    )
+    notes = [
+        str(item["item"]["content"][0]["text"])
+        for item in outbound
+        if item.get("type") == "conversation.item.create"
+    ]
+    assert any("clean" in note.lower() and "audio" in note.lower() for note in notes)
+    assert song_listen_briefing("I want to play a game", name="Arum") is None
+    confirm = song_confirm_briefing("Play Happy", name="Arum")
+    assert confirm is not None
+    assert "did you mean you wanted to hear the song called happy" in confirm.lower()
+    assert "wait" in confirm.lower()
+    assert song_confirm_briefing(asked, name="Arum") is None
+
+
+def test_a_game_request_does_not_look_up_a_song() -> None:
+    mapper = RealtimeMapper(child_name="Arum")
+    _ui, outbound = mapper.handle(
+        {
+            "type": "conversation.item.input_audio_transcription.completed",
+            "transcript": "I want to play a game.",
+        }
+    )
+    notes = [
+        str(item["item"]["content"][0]["text"])
+        for item in outbound
+        if item.get("type") == "conversation.item.create"
+    ]
+    joined = " ".join(notes).lower()
+    assert "okay, i'll play" not in joined
+    assert "kind song" not in joined
+    assert "search_videos" not in joined
+    assert game_topic("I want to play a game") == "any"
+    assert game_topic("I want to play a counting game") == "counting"
+    assert game_topic("Play a memory game") == "memory"
+    assert game_topic("Play Astronaut in the Ocean") is None
+    assert game_topic("Play Happy") is None
+    ask = game_play_briefing("I want to play a game", name="Arum")
+    assert ask is not None
+    assert "what kind" in ask.lower()
+    assert "gcompris" in ask.lower()
+    assert "wait" in ask.lower()
+    pick = game_play_briefing("I want to play a counting game", name="Arum")
+    assert pick is not None
+    assert "counting" in pick.lower()
+    assert "launch_app" in pick
+    assert any("gcompris" in note.lower() and "what kind" in note.lower() for note in notes)
+
+
+def test_an_ambiguous_play_asks_if_it_is_a_song() -> None:
+    mapper = RealtimeMapper(child_name="Arum")
+    _ui, outbound = mapper.handle(
+        {
+            "type": "conversation.item.input_audio_transcription.completed",
+            "transcript": "Play Happy.",
+        }
+    )
+    notes = [
+        str(item["item"]["content"][0]["text"])
+        for item in outbound
+        if item.get("type") == "conversation.item.create"
+    ]
+    assert any("did you mean you wanted to hear the song called happy" in note.lower() for note in notes)
+    assert all("okay, i'll play" not in note.lower() for note in notes)
 
 
 def test_video_request_sends_an_educational_briefing_to_the_model() -> None:
@@ -196,10 +300,16 @@ def test_realtime_tools_do_not_offer_written_menus() -> None:
     assert "search_videos" in names
     assert "vet_video" in names
     assert "play_video" in names
+    search = next(tool for tool in REALTIME_TOOLS if tool.get("name") == "search_videos")
+    assert "kind" in search["parameters"]["properties"]
+    play = next(tool for tool in REALTIME_TOOLS if tool.get("name") == "play_video")
+    assert "audio_only" in play["parameters"]["properties"]
     assert "video_control" in names
     assert "show_picture" in names
-    assert "switch_voice" in names
+    assert "switch_voice" not in names
     assert "set_tutor_name" in names
+    assert "list_apps" in names
+    assert "launch_app" in names
     picture = next(tool for tool in REALTIME_TOOLS if tool.get("name") == "show_picture")
     props = picture["parameters"]["properties"]
     assert "brief" in props
@@ -224,9 +334,22 @@ def test_spoken_instructions_tell_the_tutor_to_find_videos_itself() -> None:
     assert "made-up" in lowered or "story" in lowered or "pretend" in lowered
     assert "real" in lowered
     assert "answer" in lowered
-    assert "if a picture" in lowered or "only if" in lowered or "judgment" in lowered
-    assert "video" in lowered
+    assert "default" in lowered
+    assert "words" in lowered or "verbally" in lowered or "talk" in lowered
+    assert "consider" in lowered
+    assert "very helpful" in lowered
+    assert "suggest" in lowered
+    assert "song" in lowered or "hear" in lowered
+    assert "i'll play" in lowered or "okay, i'll play" in lowered
+    assert "did you mean you wanted to hear the song called" in lowered
+    assert "game" in lowered
+    assert "gcompris" in lowered
+    assert "list_apps" in text
+    assert "launch_app" in text
+    assert "do not say clean" in lowered or "don't say clean" in lowered
     assert "finish" in lowered or "this turn" in lowered or "lead-in" in lowered
+    assert "switch_voice" not in text
+    assert "i'm sorry, no, i can't, this is my voice" in lowered
 
 
 def test_a_curious_question_gets_an_answer_and_picture_not_a_video() -> None:
@@ -241,9 +364,11 @@ def test_a_curious_question_gets_an_answer_and_picture_not_a_video() -> None:
     lowered = note.lower()
     assert "arum" in lowered
     assert "picture" in lowered
-    assert "if a picture" in lowered or "only if" in lowered or "judgment" in lowered
-    assert "video" in lowered
-    assert "talk" in lowered
+    assert "default" in lowered
+    assert "words" in lowered or "verbally" in lowered or "talk" in lowered
+    assert "consider" in lowered
+    assert "very helpful" in lowered
+    assert "suggest" in lowered
     assert "this turn" in lowered or "lead-in" in lowered or "do not stop" in lowered
     assert answer_first_nudge("Show me some shark videos") is None
     assert answer_first_nudge("Tell me about Elsa") is None
@@ -259,11 +384,13 @@ def test_a_curious_question_gets_an_answer_and_picture_not_a_video() -> None:
         for item in outbound
         if item.get("type") == "conversation.item.create"
     ]
-    assert any("picture" in note.lower() and ("if" in note.lower() or "only" in note.lower()) for note in notes)
-    assert any("video" in note.lower() for note in notes)
+    assert any("default" in note.lower() and "consider" in note.lower() for note in notes)
+    assert any("very helpful" in note.lower() for note in notes)
+    assert any("suggest" in note.lower() and "video" in note.lower() for note in notes)
     create = next(item for item in outbound if item.get("type") == "response.create")
     create_text = str(create.get("response", {}).get("instructions", "")).lower()
     assert "answer" in create_text
+    assert "words" in create_text or "default" in create_text
     assert "lead-in" in create_text or "do not stop" in create_text or "this turn" in create_text
 
 
@@ -500,7 +627,50 @@ def test_play_video_emits_ui_only_when_playing() -> None:
     kinds = [str(message.get("type")) for message in spoken_done]
     assert kinds == ["video", "state"]
     assert spoken_done[0]["video_id"] == "abcdefghijk"
+    assert spoken_done[0].get("audio_only") in (None, False)
     assert spoken_done[1] == {"type": "state", "name": "listening", "detail": ""}
+
+
+def test_play_video_can_emit_audio_only() -> None:
+    mapper = RealtimeMapper()
+    mapper.handle(
+        {
+            "type": "response.function_call_arguments.done",
+            "call_id": "p3",
+            "name": "play_video",
+            "arguments": '{"video_id":"songid11111","audio_only":true}',
+        },
+        execute=lambda _name, _args: {"playing": "songid11111", "audio_only": True},
+    )
+    mapper.handle({"type": "response.done"})
+    spoken_done, _ = mapper.handle({"type": "response.done"})
+    assert spoken_done[0]["type"] == "video"
+    assert spoken_done[0]["video_id"] == "songid11111"
+    assert spoken_done[0]["audio_only"] is True
+
+
+def test_launch_app_stops_the_tutor() -> None:
+    mapper = RealtimeMapper()
+    ui, outbound = mapper.handle(
+        {
+            "type": "response.function_call_arguments.done",
+            "call_id": "g1",
+            "name": "launch_app",
+            "arguments": '{"app_id":"gcompris","activity":"enumerate"}',
+        },
+        execute=lambda _name, _args: {
+            "app_id": "gcompris",
+            "activity": "enumerate",
+            "argv": ["gcompris-qt", "--launch", "enumerate"],
+            "pid": 7,
+        },
+    )
+    assert ui[0]["type"] == "launch"
+    assert ui[0]["app_id"] == "gcompris"
+    assert ui[0]["argv"] == ["gcompris-qt", "--launch", "enumerate"]
+    assert any(item.get("type") == "response.cancel" for item in outbound)
+    leftover, _ = mapper.handle({"type": "response.output_audio.delta", "delta": "AAAA"})
+    assert leftover == []
 
 
 def test_failed_show_board_does_not_change_the_screen() -> None:
@@ -556,8 +726,7 @@ def test_a_loading_picture_shows_a_placeholder_right_away() -> None:
     spoken = str(outbound[-1]["response"]["instructions"])
     assert "I'm making you a picture" in spoken
     assert "shark depth" in spoken
-    assert "slowly" in spoken.lower()
-    assert "do not stop" in spoken.lower() or "keep" in spoken.lower()
+    assert "do not repeat" in spoken.lower() or "once" in spoken.lower()
 
 
 def test_picture_making_line_names_what_the_picture_is_about() -> None:
@@ -565,16 +734,10 @@ def test_picture_making_line_names_what_the_picture_is_about() -> None:
     assert line == "I'm making you a picture to show you pterodactyl."
     assert "picture" in picture_making_line("").lower()
     wait = picture_wait_instructions("pterodactyl").lower()
-    assert "slowly" in wait
-    assert "hang on" in wait
-    assert "do not stop" in wait
-    keep = picture_keep_talking("pterodactyl").lower()
-    assert "fact" in keep or "comparison" in keep
-    assert "do not say you are making" in keep
-    shown = picture_shown_line().lower()
-    assert "look" in shown
-    assert "do not say hang on" in shown
-    assert "do not say you are making" in shown
+    assert "i'm making you a picture" in wait
+    assert "do not repeat" in wait or "once" in wait
+    assert "do not say hang on" in wait
+    assert "do not stop" not in wait
 
 
 def test_a_loading_picture_keeps_the_tutor_talking_until_it_is_ready() -> None:
@@ -590,18 +753,16 @@ def test_a_loading_picture_keeps_the_tutor_talking_until_it_is_ready() -> None:
     )
     first_done, more = mapper.handle({"type": "response.done"})
     assert first_done[-1] == {"type": "state", "name": "thinking", "detail": ""}
-    assert more[-1]["type"] == "response.create"
-    assert "do not say you are making" in str(more[-1]["response"]["instructions"]).lower()
-    second_done, again = mapper.handle({"type": "response.done"})
-    assert second_done[-1]["name"] == "thinking"
-    assert again == []
+    assert more == []
     leftover, _ = mapper.handle({"type": "response.output_audio.delta", "delta": "QQ=="})
     assert leftover[0]["type"] == "audio_chunk"
     ready_ui, ready_out = mapper.picture_ready()
-    assert ready_ui == []
-    assert ready_out[0]["type"] == "response.cancel"
-    assert "look" in str(ready_out[-1]["response"]["instructions"]).lower()
-    assert "do not say hang on" in str(ready_out[-1]["response"]["instructions"]).lower()
+    assert ready_ui == [{"type": "state", "name": "listening", "detail": ""}]
+    assert ready_out == [{"type": "response.cancel"}]
+    assert not any(item.get("type") == "response.create" for item in ready_out)
+    again_ui, again_out = mapper.picture_ready()
+    assert again_ui == []
+    assert again_out == []
     dropped, _ = mapper.handle({"type": "response.output_audio.delta", "delta": "QQ=="})
     assert dropped == []
     after, quiet = mapper.handle({"type": "response.done"})
@@ -696,28 +857,6 @@ def test_reset_listen_sends_cancel_and_clear_on_the_socket() -> None:
         assert "input_audio_buffer.clear" in kinds
 
     asyncio.run(run())
-
-
-def test_switch_voice_reconnects_instead_of_speaking_in_the_old_voice() -> None:
-    def execute(name: str, args: dict[str, object]) -> dict[str, object]:
-        assert name == "switch_voice"
-        return {"voice": "cedar", "reconnect": True}
-
-    mapper = RealtimeMapper()
-    _ui, outbound = mapper.handle(
-        {
-            "type": "response.function_call_arguments.done",
-            "call_id": "c1",
-            "name": "switch_voice",
-            "arguments": '{"hint":"somebody else"}',
-        },
-        execute=execute,
-    )
-    reconnects = [
-        item for item in outbound if item.get("type") == "schoolbook.reconnect"
-    ]
-    assert reconnects and reconnects[0].get("voice") == "cedar"
-    assert not any(item.get("type") == "response.create" for item in outbound)
 
 
 def test_set_tutor_name_asks_for_an_instruction_update() -> None:

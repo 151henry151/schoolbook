@@ -41,6 +41,12 @@ def test_daemon_board_roundtrip() -> None:
     assert message.elements[0].type == "big_text"
 
 
+def test_client_can_close_a_running_app() -> None:
+    message = parse_client_message({"type": "app_ui", "action": "done"})
+    assert message.type == "app_ui"
+    assert message.action == "done"
+
+
 def test_session_launch_roundtrip() -> None:
     message = parse_session_message(
         {"type": "launch", "app_id": "gcompris", "argv": ["gcompris-qt", "--enable-kioskmode"]}
@@ -80,3 +86,4 @@ def test_typescript_mentions_major() -> None:
     assert f"PROTOCOL_MAJOR = {MAJOR}" in rendered
     assert 'type: "show_board"' not in rendered
     assert "dev_text" in rendered
+    assert "app_ui" in rendered

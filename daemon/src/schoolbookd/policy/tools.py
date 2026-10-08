@@ -44,7 +44,6 @@ _KNOWN = {
     "vet_video",
     "video_control",
     "show_picture",
-    "switch_voice",
     "set_tutor_name",
     "list_apps",
     "launch_app",
@@ -105,6 +104,9 @@ class ToolPolicy:
         subject = args.get("subject")
         if subject is not None and (not isinstance(subject, str) or len(subject) > 40):
             return Decision(False, "subject must be short text")
+        kind = args.get("kind", "video")
+        if kind not in {"video", "song"}:
+            return Decision(False, "kind must be video or song")
         return Decision(True, "ok")
 
     def _check_play_video(self, args: dict[str, object], ctx: PolicyContext) -> Decision:
@@ -115,6 +117,9 @@ class ToolPolicy:
             return Decision(False, "video is blocked")
         if video_id not in ctx.approved_videos:
             return Decision(False, "video has not passed vetting")
+        audio_only = args.get("audio_only", False)
+        if audio_only not in {True, False}:
+            return Decision(False, "audio_only must be true or false")
         return Decision(True, "ok")
 
     def _check_vet_video(self, args: dict[str, object], ctx: PolicyContext) -> Decision:
@@ -130,14 +135,6 @@ class ToolPolicy:
         brief = args.get("brief", topic)
         if not isinstance(brief, str) or not brief.strip() or len(brief) > 1200:
             return Decision(False, "picture brief must be short directions")
-        return Decision(True, "ok")
-
-    def _check_switch_voice(self, args: dict[str, object], ctx: PolicyContext) -> Decision:
-        hint = args.get("hint", "")
-        if hint is None:
-            hint = ""
-        if not isinstance(hint, str) or len(hint) > 80:
-            return Decision(False, "voice hint must be short text")
         return Decision(True, "ok")
 
     def _check_set_tutor_name(self, args: dict[str, object], ctx: PolicyContext) -> Decision:

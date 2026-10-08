@@ -19,7 +19,7 @@ export function PictureOverlay({
             <div className="picture-spinner" />
           </div>
         ) : (
-          <img src={`/pictures/${imageId}`} alt={imageId} />
+          <img className="picture-fit" src={`/pictures/${imageId}`} alt={imageId} />
         )}
       </div>
       <button type="button" className="video-close" aria-label="close picture" onClick={onClose}>

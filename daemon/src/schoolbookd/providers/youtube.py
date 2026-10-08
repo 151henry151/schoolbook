@@ -15,19 +15,23 @@ class YouTubeClient:
         self._api_key = api_key
         self._client = client or httpx.Client(base_url="https://www.googleapis.com", timeout=20)
 
-    def search(self, query: str) -> list[VideoCandidate]:
+    def search(self, query: str, **kwargs: object) -> list[VideoCandidate]:
+        params: dict[str, object] = {
+            "part": "snippet",
+            "type": "video",
+            "safeSearch": "strict",
+            "videoEmbeddable": "true",
+            "q": query,
+            "key": self._api_key,
+            "maxResults": 8,
+        }
+        if kwargs.get("music"):
+            params["videoCategoryId"] = "10"
+        else:
+            params["videoDuration"] = "medium"
         response = self._client.get(
             "/youtube/v3/search",
-            params={
-                "part": "snippet",
-                "type": "video",
-                "safeSearch": "strict",
-                "videoEmbeddable": "true",
-                "videoDuration": "medium",
-                "q": query,
-                "key": self._api_key,
-                "maxResults": 8,
-            },
+            params=params,
         )
         response.raise_for_status()
         ids = [

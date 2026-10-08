@@ -17,7 +17,7 @@ class ScriptSearch:
     def __init__(self, videos: list[VideoCandidate]) -> None:
         self.videos = videos
 
-    def search(self, query: str) -> list[VideoCandidate]:
+    def search(self, query: str, **_kwargs: object) -> list[VideoCandidate]:
         del query
         return self.videos
 
@@ -76,7 +76,9 @@ def test_search_vet_play_marks_the_video_playing(tmp_path: Path) -> None:
     vet = runtime.run_tool(live, "vet_video", {"video_id": "abcdefghijk"})
     assert vet["verdict"] == "approved"
     play = runtime.run_tool(live, "play_video", {"video_id": "abcdefghijk"})
-    assert play == {"playing": "abcdefghijk"}
+    assert play == {"playing": "abcdefghijk", "audio_only": False}
+    song = runtime.run_tool(live, "play_video", {"video_id": "abcdefghijk", "audio_only": True})
+    assert song == {"playing": "abcdefghijk", "audio_only": True}
     assert live.playing_video == "abcdefghijk"
     assert live.screen == "video"
 

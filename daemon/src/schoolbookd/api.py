@@ -18,7 +18,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 from fastapi import FastAPI, Request, WebSocket, WebSocketDisconnect
-from fastapi.responses import FileResponse, JSONResponse
+from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from sqlalchemy import select
 from starlette.responses import Response as StarletteResponse
 
@@ -43,11 +43,11 @@ from schoolbookd.policy.unlock import UnlockState, attempt_unlock, hash_password
 from schoolbookd.providers.base import STTProvider
 from schoolbookd.providers.openai_realtime import (
     DEFAULT_TUTOR_NAME,
-    DEFAULT_TUTOR_VOICE,
     REALTIME_TOOLS,
     RealtimeMapper,
     RealtimeTalk,
     paused_video_note,
+    preferred_tutor_voice,
     spoken_child_instructions,
 )
 from schoolbookd.runtime import LiveState, Runtime
@@ -108,6 +108,7 @@ class Host:
     openai_api_key: str = ""
     picture_emit: Callable[[dict[str, object]], Awaitable[None]] | None = None
     picture_talk: RealtimeTalk | None = None
+    song_audio: Callable[[str], tuple[bytes, str]] | None = None
 
     def request_kiosk_end(self) -> None:
         if self.data_dir is None:
@@ -189,8 +190,7 @@ class Host:
 
         learner = self.runtime.store.learner(self.learner_id)
         name = learner.first_name if learner else "friend"
-        stored_voice = self.runtime.store.get_setting("tutor_voice", DEFAULT_TUTOR_VOICE)
-        voice = stored_voice if isinstance(stored_voice, str) else DEFAULT_TUTOR_VOICE
+        voice = preferred_tutor_voice(self.runtime.store)
         stored_name = self.runtime.store.get_setting("tutor_name", DEFAULT_TUTOR_NAME)
         if isinstance(stored_name, str) and stored_name.strip():
             tutor_name = stored_name
@@ -272,6 +272,34 @@ def child_app(host: Host) -> FastAPI:
     @app.get("/token")
     def token() -> dict[str, str]:
         return {"token": host.token, "protocol_major": str(MAJOR)}
+
+    @app.get("/songs/{video_id}")
+    def song(video_id: str) -> StarletteResponse:
+        import httpx
+
+        from schoolbookd.content.audio import AUDIO_HEADERS, resolve_audio_url, song_src
+
+        try:
+            song_src(video_id)
+        except ValueError:
+            return JSONResponse({"error": "bad id"}, status_code=400)
+        if host.song_audio is not None:
+            try:
+                body, media = host.song_audio(video_id)
+            except (FileNotFoundError, RuntimeError, OSError, ValueError):
+                return JSONResponse({"error": "missing"}, status_code=404)
+            return StarletteResponse(content=body, media_type=media)
+        try:
+            url = resolve_audio_url(video_id)
+        except (RuntimeError, ValueError):
+            return JSONResponse({"error": "missing"}, status_code=404)
+
+        def chunks() -> object:
+            with httpx.stream("GET", url, headers=AUDIO_HEADERS, follow_redirects=True, timeout=60) as resp:
+                resp.raise_for_status()
+                yield from resp.iter_bytes(65536)
+
+        return StreamingResponse(chunks(), media_type="audio/mp4")
 
     @app.get("/pictures/{image_id}")
     def picture(image_id: str) -> StarletteResponse:
@@ -357,6 +385,18 @@ def child_app(host: Host) -> FastAPI:
                 except Exception as retry_exc:
                     talk = None
                     print(f"schoolbook: OpenAI Realtime still down ({retry_exc}).", file=sys.stderr)
+        loop = asyncio.get_running_loop()
+
+        def app_exited() -> None:
+            async def notify() -> None:
+                await socket.send_json({"type": "app", "action": "stop"})
+                if talk is not None:
+                    for message in await talk.reset_listen():
+                        await socket.send_json(message)
+
+            loop.call_soon_threadsafe(lambda: asyncio.create_task(notify()))
+
+        host.runtime.on_app_exit = app_exited
         try:
             while True:
                 try:
@@ -406,6 +446,12 @@ def child_app(host: Host) -> FastAPI:
                     await socket.send_json({"type": "state", "name": "home", "detail": ""})
                 elif incoming.type == "unlock_gesture":
                     await socket.send_json({"type": "state", "name": "parent_unlock", "detail": ""})
+                elif incoming.type == "app_ui":
+                    host.runtime.stop_app(host.ensure_live(), notify=False)
+                    await socket.send_json({"type": "app", "action": "stop"})
+                    if talk is not None:
+                        for message in await talk.reset_listen():
+                            await socket.send_json(message)
                 elif incoming.type == "video_ui":
                     live = host.ensure_live()
                     if incoming.action == "done":
@@ -424,6 +470,7 @@ def child_app(host: Host) -> FastAPI:
                         }
                     )
         finally:
+            host.runtime.on_app_exit = None
             host.picture_talk = None
             host.picture_emit = None
             if pump is not None:

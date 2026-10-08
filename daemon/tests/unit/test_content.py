@@ -12,7 +12,10 @@ from schoolbookd.content.vetting import (
     Review,
     VideoCandidate,
     educational_search_query,
+    is_explicit_track,
+    rank_for_clean_audio,
     rank_for_stretch,
+    song_search_query,
     update_reputation,
     vet_video,
     visible_to_tutor,
@@ -60,6 +63,52 @@ def test_visible_to_tutor_drops_baby_entertainment() -> None:
     ]
     visible = visible_to_tutor(videos, blocked_channels=set(), rejected_ids=set())
     assert [video.video_id for video in visible] == ["abcdefghijk"]
+
+
+def test_song_search_asks_for_clean_official_audio() -> None:
+    query = song_search_query("Astronaut in the Ocean")
+    lowered = query.lower()
+    assert "astronaut in the ocean" in lowered
+    assert "audio" in lowered
+    assert "documentary" not in lowered
+
+
+def test_rank_for_clean_audio_prefers_clean_audio_over_an_explicit_video() -> None:
+    explicit = _video(
+        video_id="explicit111",
+        title="Astronaut in the Ocean (Explicit) Official Video",
+        channel_title="Masked Wolf",
+    )
+    clean = _video(
+        video_id="cleanaudio1",
+        title="Astronaut in the Ocean (Clean) Official Audio",
+        channel_title="Masked Wolf - Topic",
+    )
+    assert is_explicit_track(explicit)
+    assert not is_explicit_track(clean)
+    ranked = rank_for_clean_audio([explicit, clean])
+    assert ranked[0].video_id == "cleanaudio1"
+    assert [video.video_id for video in ranked][-1] == "explicit111"
+
+
+def test_a_named_song_stays_available_when_only_explicit_audio_exists() -> None:
+    explicit = _video(
+        video_id="explicit111",
+        title="Astronaut in the Ocean (Explicit) Official Audio",
+        channel_title="Masked Wolf - Topic",
+    )
+    ranked = rank_for_clean_audio([explicit])
+    assert ranked[0].video_id == "explicit111"
+    songs = visible_to_tutor([explicit], blocked_channels=set(), rejected_ids=set(), kind="song")
+    assert [video.video_id for video in songs] == ["explicit111"]
+
+
+def test_a_named_kids_song_is_not_dropped_as_baby_entertainment() -> None:
+    shark = _video(video_id="babyshark11", title="Baby Shark", channel_title="Pinkfong")
+    hidden = visible_to_tutor([shark], blocked_channels=set(), rejected_ids=set())
+    assert hidden == []
+    songs = visible_to_tutor([shark], blocked_channels=set(), rejected_ids=set(), kind="song")
+    assert [video.video_id for video in songs] == ["babyshark11"]
 
 
 def test_rank_for_stretch_puts_explainers_first() -> None:

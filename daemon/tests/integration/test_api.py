@@ -182,6 +182,24 @@ def test_child_can_load_a_saved_picture(tmp_path: Path) -> None:
     assert ok.content == TINY_PNG
 
 
+def test_child_can_stream_a_requested_song(tmp_path: Path) -> None:
+    host = _host(tmp_path)
+
+    def fake_song(video_id: str) -> tuple[bytes, str]:
+        if video_id != "songid11111":
+            raise FileNotFoundError(video_id)
+        return b"ID3fake", "audio/mpeg"
+
+    host.song_audio = fake_song
+    child = TestClient(child_app(host))
+    assert child.get("/songs/https:evil").status_code == 400
+    assert child.get("/songs/missingid11").status_code == 404
+    ok = child.get("/songs/songid11111")
+    assert ok.status_code == 200
+    assert ok.content == b"ID3fake"
+    assert "audio/mpeg" in ok.headers["content-type"]
+
+
 def test_child_unlock_end_requests_kiosk_exit(tmp_path: Path) -> None:
     host = _host(tmp_path)
     host.data_dir = tmp_path

@@ -67,7 +67,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Stop the hang-on loop when a picture appears, and require comparison objects in the diagram to be big and visible
 - Have the tutor state the point to illustrate and let Claude choose the drawing, not only size-scale charts
 - Only make a picture when seeing helps, and allow a video instead when watching would teach better
-- Stop repeating filler talk after one extra beat while a picture loads
+- Default to a spoken answer, and only illustrate or suggest a video when that would be very helpful
+- Stop extra talk when a picture appears, and shrink the picture to fit the frame above the buttons
+- Show an ear while listening and a brain while thinking, instead of written status words
+- Remove the unused Home button and put the ear or brain between the microphone and stop buttons
+- Glow the spoken word instead of highlighting it, and time that glow from the words rather than the first audio chunk
+- Play a requested song as YouTube Music audio, prefer a clean edit when one exists, and hide the music video
+- Cover the song player instead of hiding it, and say only Okay, I'll play the song name
+- Keep the original tutor voice and refuse a voice change out loud
+- Start song audio after the YouTube player is ready, with a parked player instead of a fully covered iframe
+- Treat a bare hear as talk, not a song request
+- Play requested songs through a local audio stream instead of a hidden YouTube iframe
+- Treat play a game as a game request, and ask before playing a song when play is ambiguous
+- Ask what kind of GCompris game to play, then launch a matching activity
+- Stop tutor speech when a GCompris game starts
+- Show a floating red X over GCompris so the child can leave the game
+- Copy updated app manifests into an existing runtime on later Schoolbook starts
 
 ## [0.9.0] - 2026-10-07
 

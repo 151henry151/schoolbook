@@ -6,7 +6,10 @@
 from __future__ import annotations
 
 import contextlib
+import os
 import secrets as secrets_mod
+import shutil
+import subprocess
 from pathlib import Path
 
 import yaml
@@ -22,6 +25,7 @@ from schoolbookd.db.engine import backup_database, make_engine, migrate, session
 from schoolbookd.db.models import Learner
 from schoolbookd.db.store import Store
 from schoolbookd.notify import Notifier
+from schoolbookd.overlay import show_close_overlay
 from schoolbookd.policy.output_check import OutputCheck
 from schoolbookd.providers.base import FakeLLM, FakeSTT, FakeTTS, LLMProvider, STTProvider, TTSProvider
 from schoolbookd.runtime import Runtime
@@ -74,6 +78,9 @@ def build_host(config: SchoolbookConfig, secrets: Secrets) -> Host:
         min_video_pause_s=float(profile.watch_along_pause_min_seconds),
         pictures=_pictures(secrets, config.summary_model),
         images_dir=config.images_dir,
+        launcher=_spawn_app,
+        killer=_kill_app,
+        overlay=show_close_overlay,
     )
     return Host(
         runtime=runtime,
@@ -166,6 +173,23 @@ def _youtube(secrets: Secrets) -> SearchClient | None:
     from schoolbookd.providers.youtube import YouTubeClient
 
     return YouTubeClient(secrets.youtube_api_key)
+
+
+def _kill_app(pid: int) -> None:
+    import signal
+
+    with contextlib.suppress(ProcessLookupError, PermissionError, OSError):
+        os.kill(pid, signal.SIGTERM)
+
+
+def _spawn_app(argv: list[str]) -> int:
+    command = list(argv)
+    if command:
+        found = shutil.which(command[0])
+        if found:
+            command[0] = found
+    process = subprocess.Popen(command, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    return int(process.pid)
 
 
 def make_stt(config: SchoolbookConfig) -> STTProvider:

@@ -18,7 +18,7 @@ export const POINTER_CURSOR = `cursor: url("data:image/svg+xml,${POINTER_SVG}") 
 
 export function cartoonCursorCss(): string {
   return [
-    `html, body, button, .talk, .home, .video-overlay, .picture-overlay, .unlock { ${POINTER_CURSOR}; }`,
+    `html, body, button, .talk, .home, .video-overlay, .picture-overlay, .app-overlay, .unlock { ${POINTER_CURSOR}; }`,
     `.video-overlay.cursor-idle, .video-overlay.cursor-idle * { cursor: none !important; }`,
   ].join("\n");
 }

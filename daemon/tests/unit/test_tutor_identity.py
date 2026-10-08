@@ -9,7 +9,7 @@ from schoolbookd.policy.output_check import OutputCheck
 from schoolbookd.policy.tools import ToolPolicy
 from schoolbookd.providers.base import FakeLLM, FakeTTS
 from schoolbookd.providers.openai_realtime import (
-    next_voice,
+    preferred_tutor_voice,
     normalize_tutor_name,
     spoken_child_instructions,
 )
@@ -40,15 +40,11 @@ def _runtime(tmp_path: Path) -> tuple[Runtime, LiveState]:
     return runtime, live
 
 
-def test_next_voice_cycles_and_honors_boy_or_girl_hints() -> None:
-    after_marin = next_voice("marin")
-    assert after_marin != "marin"
-    assert next_voice(after_marin) != after_marin
-    boy = next_voice("marin", "can I talk to a boy")
-    assert boy in {"cedar", "ash", "echo", "ballad", "verse"}
-    girl = next_voice("cedar", "I want a girl voice")
-    assert girl in {"marin", "coral", "shimmer", "sage", "alloy"}
-    assert next_voice("marin", "talk to somebody else") != "marin"
+def test_preferred_tutor_voice_resets_a_stored_voice_to_marin(tmp_path: Path) -> None:
+    store = _store(tmp_path)
+    store.put_setting("tutor_voice", "cedar", actor="test")
+    assert preferred_tutor_voice(store) == "marin"
+    assert store.get_setting("tutor_voice") == "marin"
 
 
 def test_normalize_tutor_name_keeps_a_short_first_name() -> None:
@@ -61,27 +57,22 @@ def test_normalize_tutor_name_keeps_a_short_first_name() -> None:
     assert normalize_tutor_name("123 Main Street") is None
 
 
-def test_policy_allows_spoken_voice_and_name_tools() -> None:
+def test_policy_allows_a_name_but_not_a_voice_change() -> None:
     from schoolbookd.policy.tools import PolicyContext
 
     policy = ToolPolicy()
     ctx = PolicyContext()
-    assert policy.check("switch_voice", {}, ctx).allowed
-    assert policy.check("switch_voice", {"hint": "somebody else"}, ctx).allowed
-    assert not policy.check("switch_voice", {"hint": "x" * 90}, ctx).allowed
+    assert not policy.check("switch_voice", {}, ctx).allowed
     assert policy.check("set_tutor_name", {"name": "Max"}, ctx).allowed
     assert not policy.check("set_tutor_name", {"name": ""}, ctx).allowed
     assert not policy.check("set_tutor_name", {"name": "x" * 40}, ctx).allowed
 
 
-def test_switch_voice_persists_the_next_realtime_voice(tmp_path: Path) -> None:
+def test_switch_voice_is_not_a_runtime_tool(tmp_path: Path) -> None:
     runtime, live = _runtime(tmp_path)
-    first = runtime.run_tool(live, "switch_voice", {"hint": "somebody else"})
-    assert first.get("reconnect") is True
-    assert first["voice"] != "marin"
-    assert runtime.store.get_setting("tutor_voice") == first["voice"]
-    boy = runtime.run_tool(live, "switch_voice", {"hint": "a boy"})
-    assert boy["voice"] in {"cedar", "ash", "echo", "ballad", "verse"}
+    result = runtime.run_tool(live, "switch_voice", {"hint": "somebody else"})
+    assert "error" in result
+    assert runtime.store.get_setting("tutor_voice") is None
 
 
 def test_set_tutor_name_persists_a_clean_name(tmp_path: Path) -> None:
@@ -94,10 +85,10 @@ def test_set_tutor_name_persists_a_clean_name(tmp_path: Path) -> None:
     assert "error" in bad
 
 
-def test_spoken_instructions_tell_the_tutor_its_name_and_voice_tools() -> None:
+def test_spoken_instructions_tell_the_tutor_its_name_and_to_keep_its_voice() -> None:
     text = spoken_child_instructions("charter", "age-6", "Arum", tutor_name="Pixel")
     lowered = text.lower()
     assert "pixel" in lowered
-    assert "switch_voice" in text
+    assert "switch_voice" not in text
     assert "set_tutor_name" in text
-    assert "somebody else" in lowered or "different voice" in lowered
+    assert "i'm sorry, no, i can't, this is my voice" in lowered

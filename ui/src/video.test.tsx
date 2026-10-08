@@ -73,6 +73,35 @@ test("a playing video hides the cursor until the mouse moves", () => {
   vi.useRealTimers();
 });
 
+test("audio-only playback uses a local song stream", () => {
+  const play = vi.spyOn(HTMLMediaElement.prototype, "play").mockResolvedValue();
+  render(<VideoOverlay videoId="songid11111" audioOnly onClose={() => {}} />);
+  const overlay = screen.getByLabelText("song");
+  expect(overlay.className).toContain("audio-only");
+  expect(screen.queryByTitle("video")).toBeNull();
+  const audio = document.querySelector("audio");
+  expect(audio).toBeTruthy();
+  expect(audio?.getAttribute("src")).toBe("/songs/songid11111");
+  expect(audio?.hasAttribute("autoplay")).toBe(true);
+  expect(screen.getByLabelText("pause or play").className).toContain("song-cover");
+  play.mockRestore();
+});
+
+test("a tap pauses then resumes a song", () => {
+  const play = vi.spyOn(HTMLMediaElement.prototype, "play").mockResolvedValue();
+  const pause = vi.spyOn(HTMLMediaElement.prototype, "pause").mockImplementation(() => {});
+  const paused = vi.fn();
+  render(<VideoOverlay videoId="songid11111" audioOnly onClose={() => {}} onPausedChange={paused} />);
+  fireEvent.click(screen.getByLabelText("pause or play"));
+  expect(pause).toHaveBeenCalled();
+  expect(paused).toHaveBeenCalledWith(true);
+  fireEvent.click(screen.getByLabelText("pause or play"));
+  expect(play).toHaveBeenCalled();
+  expect(paused).toHaveBeenLastCalledWith(false);
+  play.mockRestore();
+  pause.mockRestore();
+});
+
 test("a paused video keeps the cursor visible", () => {
   render(<VideoOverlay videoId="abcdefghijk" paused onClose={() => {}} />);
   expect(screen.getByLabelText("video").className).not.toContain("cursor-idle");

@@ -16,7 +16,7 @@ class ScriptSearch:
         self.calls = 0
         self.queries: list[str] = []
 
-    def search(self, query: str) -> list[VideoCandidate]:
+    def search(self, query: str, **_kwargs: object) -> list[VideoCandidate]:
         self.queries.append(query)
         self.calls += 1
         return self.videos
@@ -50,6 +50,56 @@ def _video(**overrides: object) -> VideoCandidate:
     }
     fields.update(overrides)
     return VideoCandidate(**fields)  # type: ignore[arg-type]
+
+
+def test_song_search_asks_youtube_for_clean_audio(tmp_path: Path) -> None:
+    client = ScriptSearch(
+        [
+            _video(
+                video_id="explicit111",
+                title="Astronaut in the Ocean Official Video (Explicit)",
+                channel_title="Masked Wolf",
+            ),
+            _video(
+                video_id="cleanaudio1",
+                title="Astronaut in the Ocean Official Audio (Clean)",
+                channel_title="Masked Wolf - Topic",
+            ),
+        ]
+    )
+    catalog = VideoCatalog(_store(tmp_path), client, CharterReviewer(), CharterReviewer())
+    results = catalog.search("Astronaut in the Ocean", kind="song")
+    assert client.queries
+    lowered = client.queries[0].lower()
+    assert "astronaut in the ocean" in lowered
+    assert "documentary" not in lowered
+    assert results[0]["video_id"] == "cleanaudio1"
+    assert {item["video_id"] for item in results} == {"cleanaudio1", "explicit111"}
+
+
+def test_song_search_keeps_a_named_song_when_only_explicit_audio_exists(tmp_path: Path) -> None:
+    client = ScriptSearch(
+        [
+            _video(
+                video_id="explicit111",
+                title="Astronaut in the Ocean (Explicit) Official Audio",
+                channel_title="Masked Wolf - Topic",
+            ),
+        ]
+    )
+    catalog = VideoCatalog(_store(tmp_path), client, CharterReviewer(), CharterReviewer())
+    results = catalog.search("Astronaut in the Ocean", kind="song")
+    assert [item["video_id"] for item in results] == ["explicit111"]
+    assert catalog.vet("explicit111")["verdict"] == "approved"
+
+
+def test_song_search_keeps_a_named_kids_song(tmp_path: Path) -> None:
+    client = ScriptSearch(
+        [_video(video_id="babyshark11", title="Baby Shark", channel_title="Pinkfong")]
+    )
+    catalog = VideoCatalog(_store(tmp_path), client, CharterReviewer(), CharterReviewer())
+    results = catalog.search("Baby Shark", kind="song")
+    assert [item["video_id"] for item in results] == ["babyshark11"]
 
 
 def test_search_rewrites_toward_stretch_and_drops_baby_videos(tmp_path: Path) -> None:

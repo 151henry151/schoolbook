@@ -60,6 +60,11 @@ class VideoUi(BaseModel):
     action: Literal["pause", "resume", "done"]
 
 
+class AppUi(BaseModel):
+    type: Literal["app_ui"] = "app_ui"
+    action: Literal["done"]
+
+
 class UnlockGesture(BaseModel):
     type: Literal["unlock_gesture"] = "unlock_gesture"
 
@@ -81,6 +86,7 @@ ClientMessage = Annotated[
     | ChoiceSelected
     | BoardTap
     | VideoUi
+    | AppUi
     | UnlockGesture
     | GoHome
     | Ping,

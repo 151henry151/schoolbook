@@ -18,7 +18,9 @@ from schoolbookd.content.vetting import (
     Review,
     VideoCandidate,
     educational_search_query,
+    rank_for_clean_audio,
     rank_for_stretch,
+    song_search_query,
     update_reputation,
     vet_video,
     visible_to_tutor,
@@ -28,7 +30,7 @@ from schoolbookd.db.store import Store
 
 
 class SearchClient(Protocol):
-    def search(self, query: str) -> list[VideoCandidate]: ...
+    def search(self, query: str, **kwargs: object) -> list[VideoCandidate]: ...
 
 
 class Reviewer(Protocol):
@@ -136,27 +138,61 @@ class VideoCatalog:
         self.duration_minutes = duration_minutes
         self.language = language
 
-    def search(self, query: str) -> list[dict[str, object]]:
-        shaped = educational_search_query(query)
-        key = "yt-cache-v2:" + shaped.strip().lower()
+    def search(self, query: str, *, kind: str = "video") -> list[dict[str, object]]:
+        song = kind == "song"
+        shaped = song_search_query(query) if song else educational_search_query(query)
+        key = ("yt-song-v1:" if song else "yt-cache-v2:") + shaped.strip().lower()
         cached_ids = self.store.get_setting(key)
         candidates = self._load_cached(cached_ids)
         if candidates is None:
-            candidates = self.youtube.search(shaped) if self.youtube is not None else []
+            if self.youtube is not None:
+                candidates = self.youtube.search(shaped, music=song)
+            else:
+                candidates = []
             if candidates:
                 self._remember(key, candidates)
-        kept = rank_for_stretch(
-            visible_to_tutor(
-                candidates,
-                blocked_channels=self.store.blocked_channels(),
-                rejected_ids=self.store.rejected_ids(),
-                duration_minutes=self.duration_minutes,
-                language=self.language,
-            )
+        visible = visible_to_tutor(
+            candidates,
+            blocked_channels=self.store.blocked_channels(),
+            rejected_ids=self.store.rejected_ids(),
+            duration_minutes=self.duration_minutes,
+            language=self.language,
+            kind="song" if song else "video",
         )
-        if not kept:
+        kept = rank_for_clean_audio(visible) if song else rank_for_stretch(visible)
+        if song:
+            self._approve_requested_songs(kept)
+        elif not kept:
             kept = self._approved_matching(query)
         return [public_candidate(video) for video in kept]
+
+    def _approve_requested_songs(self, videos: list[VideoCandidate]) -> None:
+        for video in videos:
+            existing = self.store.video(video.video_id)
+            if existing is not None and existing.verdict == "blocked":
+                continue
+            self.store.save_video(
+                Video(
+                    id=video.video_id,
+                    source="youtube",
+                    source_ref=video.video_id,
+                    title=video.title,
+                    channel_id=video.channel_id,
+                    channel_title=video.channel_title,
+                    duration_s=video.duration_s,
+                    summary=video.description[:500],
+                    verdict="approved",
+                    verdict_reasons="requested song audio",
+                    est_level=1,
+                    vetted_at=datetime.now(UTC),
+                    made_for_kids=1 if video.made_for_kids else 0,
+                    embeddable=1 if video.embeddable else 0,
+                    age_restricted=1 if video.age_restricted else 0,
+                    live=1 if video.live else 0,
+                    short=1 if video.short else 0,
+                    language=video.language,
+                )
+            )
 
     def vet(self, video_id: str) -> dict[str, object]:
         existing = self.store.video(video_id)
