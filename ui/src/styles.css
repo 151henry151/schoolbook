@@ -96,4 +96,36 @@ button { min-height: 64px; min-width: 64px; font-size: 1.4rem; }
 .hold-corner { position: fixed; top: 0; right: 0; width: 64px; height: 64px; opacity: 0; z-index: 20; }
 .hold-left { right: auto; left: 0; }
 .home-button { position: fixed; left: 1rem; bottom: 1rem; }
+.talk-controls {
+  position: fixed;
+  right: 1.2rem;
+  bottom: 1.2rem;
+  display: grid;
+  gap: 0.75rem;
+  justify-items: center;
+  z-index: 28;
+}
+.listen-button,
+.stop-button {
+  width: 5.6rem;
+  height: 5.6rem;
+  min-width: 5.6rem;
+  min-height: 5.6rem;
+  padding: 0;
+  border: 0;
+  display: grid;
+  place-items: center;
+}
+.listen-button {
+  border-radius: 999px;
+  background: #2f7d9a;
+  color: #fff;
+  box-shadow: 0 6px 0 #1d5368;
+}
+.listen-button svg,
+.stop-button svg { width: 3.4rem; height: 3.4rem; display: block; }
+.stop-button svg { width: 5.4rem; height: 5.4rem; }
+.listen-button:active { transform: translateY(3px); box-shadow: 0 3px 0 #1d5368; }
+.stop-button { background: transparent; }
+.stop-button:active { transform: translateY(3px); }
 .unlock { position: fixed; inset: 0; display: grid; place-items: center; background: #f6efe2; z-index: 30; }

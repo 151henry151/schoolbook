@@ -20,13 +20,76 @@ def connect_headers(api_key: str) -> dict[str, str]:
     return {"Authorization": f"Bearer {api_key}"}
 
 
-def spoken_child_instructions(core: str, age_text: str, name: str) -> str:
+REALTIME_VOICES = (
+    "marin",
+    "cedar",
+    "coral",
+    "ash",
+    "sage",
+    "echo",
+    "shimmer",
+    "ballad",
+    "alloy",
+    "verse",
+)
+GIRL_VOICES = ("marin", "coral", "shimmer", "sage", "alloy")
+BOY_VOICES = ("cedar", "ash", "echo", "ballad", "verse")
+DEFAULT_TUTOR_VOICE = "marin"
+DEFAULT_TUTOR_NAME = "Schoolbook"
+
+
+def next_voice(current: str, hint: str = "") -> str:
+    lowered = (hint or "").lower()
+    wants_girl = any(word in lowered for word in ("girl", "lady", "woman", "she", "her"))
+    wants_boy = any(word in lowered for word in ("boy", "man", "guy", "dude", "him"))
+    if wants_girl and not wants_boy:
+        pool = GIRL_VOICES
+    elif wants_boy and not wants_girl:
+        pool = BOY_VOICES
+    else:
+        pool = REALTIME_VOICES
+    if current in pool:
+        return pool[(pool.index(current) + 1) % len(pool)]
+    return pool[0]
+
+
+def normalize_tutor_name(text: str) -> str | None:
+    raw = (text or "").strip()
+    if re.search(r"\d", raw):
+        return None
+    match = re.search(
+        r"(?:call you|named|name is|name you|be)\s+([A-Za-z][A-Za-z'\-]*(?:\s+[A-Za-z][A-Za-z'\-]*)?)\s*$",
+        raw,
+        re.I,
+    )
+    if match:
+        raw = match.group(1)
+    cleaned = re.sub(r"[^A-Za-z\s'\-]", " ", raw)
+    words = [word for word in cleaned.split() if word]
+    if not 1 <= len(words) <= 2:
+        return None
+    name = " ".join(word[:1].upper() + word[1:] for word in words)
+    if not 2 <= len(name) <= 20:
+        return None
+    if re.search(r"\d", name):
+        return None
+    return name
+
+
+def spoken_child_instructions(
+    core: str,
+    age_text: str,
+    name: str,
+    tutor_name: str = DEFAULT_TUTOR_NAME,
+) -> str:
     return "\n\n".join(
         [
             core.strip(),
             age_text.strip(),
             (
                 f"The child's name is {name}. He is six and cannot read yet. "
+                f"Your name is {tutor_name}. If he calls you {tutor_name}, he means you. "
+                "Answer to that name. "
                 "Every reply must be spoken out loud. Never show written menus, buttons, or choice lists. "
                 "Do not call ask_choice. Ask one spoken question and wait. "
                 "Pictures and videos are fine. Keep turns short and warm. "
@@ -40,13 +103,21 @@ def spoken_child_instructions(core: str, age_text: str, name: str) -> str:
                 "Do not call show_board with a made-up image_id. "
                 "When searching videos, use a short query like dinosaur fossils. "
                 "Search once, vet the best candidate, and play it. Do not talk between those tools. "
-                "If the child's words do not make sense, say: "
-                "It sounded like you said those words. Is that what you said? Then wait. Do not guess. "
+                "Stay quiet if you only hear um, uh, or a short noise. Keep listening. "
+                "He cannot read. If a system note says the words were unclear, speak those words out loud: "
+                "It sounded like you said [the words]. Is that what you said? "
+                "Do not ask that on a normal sentence. "
+                "If he talks about made-up characters, magic lands, or pretend stories, "
+                "be warm for one short beat, then gently steer toward something real he can learn. "
+                "Do not dwell on the pretend world. "
                 "If a video is paused and the child talks, listen. "
                 "If they ask a question about the video, answer it and call show_picture if a picture helps. "
                 "Then ask if they want to keep watching. "
                 "If they say yes, call video_control resume. If they say no, call video_control stop. "
                 "For a different video, search and play a new one. "
+                "If he asks to talk to somebody else, or wants a boy or girl voice, call switch_voice. "
+                "If he gives you a name, or asks to call you something, call set_tutor_name with that name. "
+                "Do not say OpenAI voice names out loud. "
                 "Never ask the child or a grown-up for a video ID. "
                 "Do not say safe, vetted, approved, or mention a video ID out loud."
             ),
@@ -86,6 +157,7 @@ def video_topic(text: str) -> str | None:
 
 
 _SHORT_OK = {"a", "i", "no", "yes", "ok", "hi", "hey", "wow", "why", "how", "who", "what"}
+_FILLERS = {"um", "uh", "uhm", "hmm", "mm", "mmm", "ah", "er", "eh", "huh", "like"}
 
 
 def looks_like_child_speech(text: str) -> bool:
@@ -95,22 +167,59 @@ def looks_like_child_speech(text: str) -> bool:
     real = 0
     for word in words:
         low = word.lower()
-        if low in _SHORT_OK or (len(low) >= 3 and re.search(r"[aeiouy]", low)):
+        if low in _SHORT_OK:
+            real += 1
+        elif (
+            len(low) >= 3
+            and re.search(r"[aeiouy]", low)
+            and not re.search(r"[bcdfghjklmnpqrstvwxz]{4,}", low)
+        ):
             real += 1
     return real > 0 and real / len(words) >= 0.5
 
 
-def clarify_speech_note(text: str) -> str:
+def extract_child_speech(text: str) -> str:
+    cleaned = re.sub(r"[\u4e00-\u9fff]+", " ", text or "")
+    cleaned = re.sub(r"(?i)\b(?:" + "|".join(_FILLERS) + r")\b[,\s]*", " ", cleaned)
+    tokens = re.findall(r"[A-Za-z\u00C0-\u024F']+|[^\sA-Za-z\u00C0-\u024F']+", cleaned)
+    kept: list[str] = []
+    for token in tokens:
+        if re.fullmatch(r"\s+", token):
+            continue
+        if re.fullmatch(r"[A-Za-z\u00C0-\u024F']+", token):
+            if re.search(r"[\u00C0-\u024F]", token) and len(token) <= 2:
+                continue
+            kept.append(token)
+            continue
+        if kept and re.fullmatch(r"[.?!]+", token):
+            kept[-1] = kept[-1] + token
+    return " ".join(kept)
+
+
+def child_speech_decision(text: str) -> tuple[str, str]:
+    cleaned = extract_child_speech(text)
+    if not cleaned:
+        return ("wait", "")
+    if looks_like_child_speech(cleaned):
+        return ("ready", cleaned)
+    if len(cleaned.split()) < 2:
+        return ("wait", "")
+    return ("unclear", cleaned)
+
+
+def spoken_clarify(text: str) -> str:
     heard = " ".join((text or "").split())
     if not heard:
-        return (
-            "The child's words were not clear. "
-            "Say you did not catch that and ask them to say it again. Do not guess."
-        )
+        return "I did not catch that. Can you say it again?"
+    return f"It sounded like you said {heard}. Is that what you said?"
+
+
+def clarify_speech_note(text: str) -> str:
+    heard = " ".join((text or "").split())
+    line = spoken_clarify(heard)
     return (
-        f'It sounded like the child said: "{heard}". That may be wrong. '
-        f"Ask out loud: It sounded like you said {heard}. Is that what you said? "
-        "Then wait. Do not start a video, picture, or new topic until they confirm or say it again."
+        f"The child cannot read. Speak this out loud, word for word, then wait: {line} "
+        "Do not start a video, picture, or new topic until they confirm or say it again."
     )
 
 
@@ -122,6 +231,62 @@ def paused_video_note() -> str:
         "If they say yes, call video_control resume. Do not start the video over. "
         "If they say no, or want something else, call video_control stop and then help them. "
         "If they want a different video, search, vet, and play a new one."
+    )
+
+
+_FANTASY_MARKERS = (
+    "pokemon",
+    "pikachu",
+    "spiderman",
+    "spider-man",
+    "batman",
+    "elsa",
+    "frozen",
+    "peppa",
+    "cocomelon",
+    "minecraft",
+    "roblox",
+    "fortnite",
+    "mario",
+    "sonic",
+    "harry potter",
+    "hogwarts",
+    "jedi",
+    "sith",
+    "lightsaber",
+    "unicorn",
+    "mermaid",
+    "wizard",
+    "witch",
+    "fairy",
+    "fairies",
+    "superhero",
+    "supervillain",
+    "enchanted",
+    "magic land",
+    "fantasy",
+    "make believe",
+    "make-believe",
+    "pretend land",
+    "dragon",
+)
+
+
+def looks_like_fantasy(text: str) -> bool:
+    lowered = (text or "").lower()
+    lowered = lowered.replace("komodo dragon", " ").replace("komodo", " ")
+    return any(re.search(r"\b" + re.escape(marker) + r"\b", lowered) for marker in _FANTASY_MARKERS)
+
+
+def real_world_nudge(text: str, *, name: str = "the child") -> str | None:
+    if not looks_like_fantasy(text):
+        return None
+    return (
+        f"{name} brought up something made-up or from a story. "
+        "Be warm for one short beat, then gently steer toward something real: "
+        "animals, how things work, history, the sky, or something he can see. "
+        "Do not dwell on the pretend world, invent more lore, or put on a cartoon about it. "
+        "If he wants a video or picture, pick a real-world cousin of the idea."
     )
 
 
@@ -161,7 +326,13 @@ def resample_pcm16(pcm: bytes, from_rate: int, to_rate: int) -> bytes:
     return out.tobytes()
 
 
-def session_update(*, instructions: str, tools: list[dict[str, object]]) -> dict[str, object]:
+def session_update(
+    *,
+    instructions: str,
+    tools: list[dict[str, object]],
+    voice: str = DEFAULT_TUTOR_VOICE,
+) -> dict[str, object]:
+    chosen = voice if voice in REALTIME_VOICES else DEFAULT_TUTOR_VOICE
     return {
         "type": "session.update",
         "session": {
@@ -176,13 +347,15 @@ def session_update(*, instructions: str, tools: list[dict[str, object]]) -> dict
                         "type": "server_vad",
                         "create_response": False,
                         "interrupt_response": False,
-                        "silence_duration_ms": 700,
+                        "silence_duration_ms": 1600,
+                        "prefix_padding_ms": 400,
+                        "threshold": 0.6,
                     },
                     "transcription": {"model": "gpt-4o-mini-transcribe"},
                 },
                 "output": {
                     "format": {"type": "audio/pcm", "rate": OUTPUT_RATE},
-                    "voice": "marin",
+                    "voice": chosen,
                 },
             },
             "tools": tools,
@@ -262,6 +435,32 @@ REALTIME_TOOLS: list[dict[str, object]] = [
             "required": ["topic"],
         },
     },
+    {
+        "type": "function",
+        "name": "switch_voice",
+        "description": (
+            "Switch to a different speaking voice. Use when the child asks to talk to "
+            "somebody else, or wants a boy or girl voice. Pass a short hint like "
+            "somebody else, boy, or girl."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {"hint": {"type": "string"}},
+        },
+    },
+    {
+        "type": "function",
+        "name": "set_tutor_name",
+        "description": (
+            "Remember the name the child wants to call you. Use when they say "
+            "your name is, call you, or I want you to be named."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {"name": {"type": "string"}},
+            "required": ["name"],
+        },
+    },
 ]
 
 
@@ -276,9 +475,28 @@ class RealtimeMapper:
     hold_picture: bool = False
     child_partial: str = ""
     tutor_partial: str = ""
+    drop_input: bool = False
+    drop_output: bool = False
 
     def append_audio(self, pcm_b64: str) -> dict[str, object]:
         return {"type": "input_audio_buffer.append", "audio": pcm_b64}
+
+    def reset_listen(self) -> tuple[list[dict[str, object]], list[dict[str, object]]]:
+        self.child_partial = ""
+        self.tutor_partial = ""
+        self.pending_video = None
+        self.hold_video = False
+        self.pending_picture = None
+        self.hold_picture = False
+        self.drop_input = True
+        self.drop_output = True
+        return (
+            [{"type": "state", "name": "listening", "detail": ""}],
+            [
+                {"type": "response.cancel"},
+                {"type": "input_audio_buffer.clear"},
+            ],
+        )
 
     def handle(
         self,
@@ -286,6 +504,31 @@ class RealtimeMapper:
         execute: Execute | None = None,
     ) -> tuple[list[dict[str, object]], list[dict[str, object]]]:
         kind = str(event.get("type", ""))
+        if kind == "input_audio_buffer.speech_started":
+            self.drop_input = False
+            self.child_partial = ""
+            return ([{"type": "state", "name": "listening", "detail": "hearing"}], [])
+        if kind == "response.created":
+            self.drop_output = False
+            return ([], [])
+        if self.drop_input and kind in {
+            "input_audio_buffer.speech_stopped",
+            "conversation.item.input_audio_transcription.delta",
+            "conversation.item.input_audio_transcription.completed",
+            "conversation.item.input_audio_transcription.failed",
+        }:
+            return ([], [])
+        if self.drop_output and kind in {
+            "response.output_audio.delta",
+            "response.audio.delta",
+            "response.output_audio_transcript.delta",
+            "response.audio_transcript.delta",
+            "response.audio_transcript.done",
+            "response.output_audio_transcript.done",
+        }:
+            return ([], [])
+        if self.drop_output and kind == "response.done":
+            return ([{"type": "state", "name": "listening", "detail": ""}], [])
         if kind in {"response.output_audio.delta", "response.audio.delta"}:
             delta = str(event.get("delta", ""))
             chunk = {
@@ -299,9 +542,6 @@ class RealtimeMapper:
             return ([chunk], [])
         if kind == "error":
             return ([{"type": "state", "name": "listening", "detail": ""}], [])
-        if kind == "input_audio_buffer.speech_started":
-            self.child_partial = ""
-            return ([{"type": "state", "name": "listening", "detail": "hearing"}], [])
         if kind == "input_audio_buffer.speech_stopped":
             return ([{"type": "state", "name": "thinking", "detail": ""}], [])
         if kind == "response.done":
@@ -353,37 +593,56 @@ class RealtimeMapper:
                 [],
             )
         if kind == "conversation.item.input_audio_transcription.failed":
-            return (
-                [],
-                [
-                    {
-                        "type": "conversation.item.create",
-                        "item": {
-                            "type": "message",
-                            "role": "system",
-                            "content": [{"type": "input_text", "text": clarify_speech_note("")}],
-                        },
-                    },
-                    {"type": "response.create"},
-                ],
-            )
+            return ([], [])
         if kind == "conversation.item.input_audio_transcription.completed":
             text = str(event.get("transcript", "")).strip() or self.child_partial.strip()
             self.child_partial = ""
+            decision, cleaned = child_speech_decision(text)
+            if decision == "wait":
+                return ([], [])
             outbound: list[dict[str, object]] = []
-            if text and not looks_like_child_speech(text):
+            messages: list[dict[str, object]] = [
+                {
+                    "type": "transcript",
+                    "turn_id": self.turn_id,
+                    "role": "child",
+                    "text": cleaned,
+                    "partial": False,
+                }
+            ]
+            if decision == "unclear":
+                line = spoken_clarify(cleaned)
                 outbound.append(
                     {
                         "type": "conversation.item.create",
                         "item": {
                             "type": "message",
                             "role": "system",
-                            "content": [{"type": "input_text", "text": clarify_speech_note(text)}],
+                            "content": [{"type": "input_text", "text": clarify_speech_note(cleaned)}],
                         },
                     }
                 )
+                outbound.append(
+                    {
+                        "type": "response.create",
+                        "response": {
+                            "instructions": (
+                                f"The child cannot read. Speak this out loud, word for word, then wait: {line}"
+                            )
+                        },
+                    }
+                )
+                messages.append(
+                    {
+                        "type": "transcript",
+                        "turn_id": self.turn_id,
+                        "role": "tutor",
+                        "text": line,
+                        "partial": False,
+                    }
+                )
             else:
-                briefing = video_watch_briefing(text, name=self.child_name) if text else None
+                briefing = video_watch_briefing(cleaned, name=self.child_name) if cleaned else None
                 if briefing:
                     outbound.append(
                         {
@@ -395,21 +654,21 @@ class RealtimeMapper:
                             },
                         }
                     )
-            outbound.append({"type": "response.create"})
-            if not text:
-                return ([], outbound)
-            return (
-                [
-                    {
-                        "type": "transcript",
-                        "turn_id": self.turn_id,
-                        "role": "child",
-                        "text": text,
-                        "partial": False,
-                    }
-                ],
-                outbound,
-            )
+                nudge = real_world_nudge(cleaned, name=self.child_name) if cleaned else None
+                if nudge:
+                    outbound.append(
+                        {
+                            "type": "conversation.item.create",
+                            "item": {
+                                "type": "message",
+                                "role": "system",
+                                "content": [{"type": "input_text", "text": nudge}],
+                            },
+                        }
+                    )
+                outbound.append({"type": "response.create"})
+            self.drop_output = False
+            return (messages, outbound)
         if kind in {"response.audio_transcript.done", "response.output_audio_transcript.done"}:
             text = str(event.get("transcript", "")).strip() or self.tutor_partial.strip()
             self.tutor_partial = ""
@@ -428,12 +687,32 @@ class RealtimeMapper:
                 [],
             )
         if kind == "response.function_call_arguments.done":
+            if self.drop_output:
+                return self._cancelled_function(event)
             return self._function_call(event, execute)
         if kind == "response.output_item.done":
             item = event.get("item")
             if isinstance(item, dict) and item.get("type") == "function_call":
+                if self.drop_output:
+                    return self._cancelled_function(item)
                 return self._function_call(item, execute)
         return ([], [])
+
+    def _cancelled_function(self, event: dict[str, object]) -> tuple[list[dict[str, object]], list[dict[str, object]]]:
+        call_id = str(event.get("call_id", "call"))
+        return (
+            [],
+            [
+                {
+                    "type": "conversation.item.create",
+                    "item": {
+                        "type": "function_call_output",
+                        "call_id": call_id,
+                        "output": json.dumps({"cancelled": True}),
+                    },
+                }
+            ],
+        )
 
     def _function_call(
         self,
@@ -496,6 +775,34 @@ class RealtimeMapper:
                     "at_s": None,
                 }
                 self.hold_video = True
+        elif name == "switch_voice" and result.get("reconnect") and result.get("voice"):
+            return (
+                [],
+                [{"type": "schoolbook.reconnect", "voice": str(result["voice"])}],
+            )
+        elif name == "set_tutor_name" and result.get("name") and "error" not in result:
+            chosen = str(result["name"])
+            outbound = [
+                {"type": "schoolbook.rename", "name": chosen},
+                {
+                    "type": "conversation.item.create",
+                    "item": {
+                        "type": "function_call_output",
+                        "call_id": call_id,
+                        "output": json.dumps(result),
+                    },
+                },
+                {
+                    "type": "response.create",
+                    "response": {
+                        "instructions": (
+                            f"The child named you {chosen}. Say they can call you {chosen}. "
+                            "Do not mention tools."
+                        )
+                    },
+                },
+            ]
+            return (ui, outbound)
         outbound: list[dict[str, object]] = [
             {
                 "type": "conversation.item.create",
@@ -521,6 +828,8 @@ class RealtimeTalk:
     connect: Connect | None = None
     mapper: RealtimeMapper = field(default_factory=RealtimeMapper)
     tools: list[dict[str, object]] = field(default_factory=lambda: list(REALTIME_TOOLS))
+    voice: str = DEFAULT_TUTOR_VOICE
+    tutor_name: str = DEFAULT_TUTOR_NAME
     _socket: Any = None
 
     async def start(self) -> None:
@@ -532,7 +841,29 @@ class RealtimeTalk:
         created = json.loads(raw)
         if not isinstance(created, dict) or created.get("type") != "session.created":
             raise RuntimeError(f"realtime handshake failed: {created}")
-        await self._socket.send(json.dumps(session_update(instructions=self.instructions, tools=self.tools)))
+        await self._socket.send(
+            json.dumps(session_update(instructions=self.instructions, tools=self.tools, voice=self.voice))
+        )
+
+    async def reconnect(self, voice: str) -> None:
+        await self.close()
+        self.voice = voice if voice in REALTIME_VOICES else DEFAULT_TUTOR_VOICE
+        self.mapper.reset_listen()
+        await self.start()
+
+    async def rename(self, tutor_name: str) -> None:
+        self.tutor_name = tutor_name
+        marker = "\n\n# tutor-identity\n"
+        base = self.instructions.split(marker)[0]
+        self.instructions = (
+            f"{base}{marker}Your name is {tutor_name}. "
+            f"If the child calls you {tutor_name}, they mean you. Answer to that name."
+        )
+        if self._socket is None:
+            return
+        await self._socket.send(
+            json.dumps(session_update(instructions=self.instructions, tools=self.tools, voice=self.voice))
+        )
 
     async def append_pcm16(self, pcm: bytes, sample_rate: int = 16000) -> None:
         import base64
@@ -542,6 +873,13 @@ class RealtimeTalk:
         stretched = resample_pcm16(pcm, sample_rate, INPUT_RATE)
         payload = self.mapper.append_audio(base64.b64encode(stretched).decode("ascii"))
         await self._socket.send(json.dumps(payload))
+
+    async def reset_listen(self) -> list[dict[str, object]]:
+        ui, outbound = self.mapper.reset_listen()
+        if self._socket is not None:
+            for outgoing in outbound:
+                await self._socket.send(json.dumps(outgoing))
+        return ui
 
     async def add_system_note(self, text: str) -> None:
         if self._socket is None or not text.strip():
@@ -559,10 +897,41 @@ class RealtimeTalk:
             )
         )
 
-    async def pump(self, emit: Emit) -> None:
-        if self._socket is None:
+    async def _send_outgoing(self, outgoing: dict[str, object]) -> None:
+        kind = str(outgoing.get("type", ""))
+        if kind == "schoolbook.reconnect":
+            await self.reconnect(str(outgoing.get("voice") or DEFAULT_TUTOR_VOICE))
+            if self._socket is not None:
+                await self._socket.send(
+                    json.dumps(
+                        {
+                            "type": "response.create",
+                            "response": {
+                                "instructions": (
+                                    "The child asked to talk to somebody else. "
+                                    "Greet them briefly in this new voice. "
+                                    "Do not say a voice name or mention OpenAI."
+                                )
+                            },
+                        }
+                    )
+                )
             return
-        async for raw in self._socket:
+        if kind == "schoolbook.rename":
+            await self.rename(str(outgoing.get("name") or DEFAULT_TUTOR_NAME))
+            return
+        if self._socket is not None:
+            await self._socket.send(json.dumps(outgoing))
+
+    async def pump(self, emit: Emit) -> None:
+        while self._socket is not None:
+            socket = self._socket
+            try:
+                raw = await socket.recv()
+            except Exception:
+                if self._socket is not None and self._socket is not socket:
+                    continue
+                return
             if isinstance(raw, bytes):
                 raw = raw.decode()
             try:
@@ -575,7 +944,7 @@ class RealtimeTalk:
             for message in ui:
                 await emit(message)
             for outgoing in outbound:
-                await self._socket.send(json.dumps(outgoing))
+                await self._send_outgoing(outgoing)
 
     async def close(self) -> None:
         socket = self._socket

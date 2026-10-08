@@ -22,6 +22,7 @@ export class PlaybackQueue {
   private playedMs = 0;
   private progress: ((elapsedMs: number, durationMs: number) => void) | null = null;
   private pending = 0;
+  private epoch = 0;
 
   constructor(private readonly player: AudioPlayer) {}
 
@@ -34,6 +35,7 @@ export class PlaybackQueue {
   }
 
   async enqueue(turnId: string, pcm: Int16Array, sampleRate: number): Promise<void> {
+    const epoch = this.epoch;
     if (this.turnId !== turnId) {
       this.turnId = turnId;
       this.queuedMs = 0;
@@ -44,7 +46,7 @@ export class PlaybackQueue {
     this.pending += 1;
     this.tail = this.tail.then(async () => {
       try {
-        if (this.ignored.has(turnId)) return;
+        if (epoch !== this.epoch || this.ignored.has(turnId)) return;
         this.active = turnId;
         const begun = Date.now();
         const tick = globalThis.setInterval(() => {
@@ -60,7 +62,7 @@ export class PlaybackQueue {
           this.progress?.(this.playedMs, this.queuedMs);
         }
       } finally {
-        this.pending -= 1;
+        if (epoch === this.epoch) this.pending = Math.max(0, this.pending - 1);
         this.active = null;
       }
     });
@@ -68,10 +70,12 @@ export class PlaybackQueue {
   }
 
   interrupt(): void {
-    if (this.active) this.ignored.add(this.active);
+    this.epoch += 1;
     this.active = null;
     this.queuedMs = 0;
     this.playedMs = 0;
+    this.pending = 0;
+    this.tail = Promise.resolve();
     this.player.stop();
   }
 

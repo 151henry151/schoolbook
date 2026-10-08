@@ -44,6 +44,8 @@ _KNOWN = {
     "vet_video",
     "video_control",
     "show_picture",
+    "switch_voice",
+    "set_tutor_name",
     "list_apps",
     "launch_app",
     "get_skill_status",
@@ -125,6 +127,20 @@ class ToolPolicy:
         topic = args.get("topic")
         if not isinstance(topic, str) or not topic.strip() or len(topic) > 80:
             return Decision(False, "picture topic must be a short phrase")
+        return Decision(True, "ok")
+
+    def _check_switch_voice(self, args: dict[str, object], ctx: PolicyContext) -> Decision:
+        hint = args.get("hint", "")
+        if hint is None:
+            hint = ""
+        if not isinstance(hint, str) or len(hint) > 80:
+            return Decision(False, "voice hint must be short text")
+        return Decision(True, "ok")
+
+    def _check_set_tutor_name(self, args: dict[str, object], ctx: PolicyContext) -> Decision:
+        name = args.get("name")
+        if not isinstance(name, str) or not name.strip() or len(name) > 32:
+            return Decision(False, "tutor name must be a short first name")
         return Decision(True, "ok")
 
     def _check_video_control(self, args: dict[str, object], ctx: PolicyContext) -> Decision:

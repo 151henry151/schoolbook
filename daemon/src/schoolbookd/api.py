@@ -42,6 +42,8 @@ from schoolbookd.db.models import (
 from schoolbookd.policy.unlock import UnlockState, attempt_unlock, hash_password
 from schoolbookd.providers.base import STTProvider
 from schoolbookd.providers.openai_realtime import (
+    DEFAULT_TUTOR_NAME,
+    DEFAULT_TUTOR_VOICE,
     REALTIME_TOOLS,
     RealtimeMapper,
     RealtimeTalk,
@@ -185,10 +187,18 @@ class Host:
 
         learner = self.runtime.store.learner(self.learner_id)
         name = learner.first_name if learner else "friend"
+        stored_voice = self.runtime.store.get_setting("tutor_voice", DEFAULT_TUTOR_VOICE)
+        voice = stored_voice if isinstance(stored_voice, str) else DEFAULT_TUTOR_VOICE
+        stored_name = self.runtime.store.get_setting("tutor_name", DEFAULT_TUTOR_NAME)
+        if isinstance(stored_name, str) and stored_name.strip():
+            tutor_name = stored_name
+        else:
+            tutor_name = DEFAULT_TUTOR_NAME
         instructions = spoken_child_instructions(
             self.runtime.core_prompt,
             render_age_profile(self.runtime.age_profile),
             name,
+            tutor_name=tutor_name,
         )
 
         def execute(tool: str, args: dict[str, object]) -> dict[str, object]:
@@ -200,6 +210,8 @@ class Host:
             execute=execute,
             tools=list(REALTIME_TOOLS),
             mapper=RealtimeMapper(child_name=name),
+            voice=voice,
+            tutor_name=tutor_name,
         )
 
     def note_transcript(self, role: str, text: str) -> None:
@@ -332,7 +344,10 @@ def child_app(host: Host) -> FastAPI:
                     for message in _ws_messages(outcome, incoming.turn_id):
                         await socket.send_json(message)
                 elif incoming.type == "talk_start":
-                    if talk is None and host.voice != "realtime":
+                    if talk is not None:
+                        for message in await talk.reset_listen():
+                            await socket.send_json(message)
+                    elif host.voice != "realtime":
                         host.begin_talk(incoming.turn_id)
                         await socket.send_json({"type": "state", "name": "listening", "detail": ""})
                 elif incoming.type == "audio_frame":

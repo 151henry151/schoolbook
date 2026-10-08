@@ -48,6 +48,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Ask the child to confirm when a transcript looks garbled instead of guessing
 - Answer a question over a paused video, keep the player, and resume or stop after they choose
 - Use a bigger cartoon pointer with a white center and a blue outline, and hide it during video until the mouse moves
+- Wait longer after the child pauses, drop um and leftover noise, and answer only when a real sentence is there
+- Speak unclear words back out loud when a clarification is needed, because the child cannot read
+- Steer made-up character and pretend-land talk toward something real the child can learn
+- Add a round microphone button that stops the tutor and the child's turn and starts a fresh listen from the click
+- Add a stop-sign button that pauses listening until the child taps the microphone again
+- Let the child switch the tutor voice by asking to talk to somebody else, or to a boy or girl voice
+- Let the child give the tutor a name by voice and have the tutor answer to that name
 
 ## [0.9.0] - 2026-10-07
 

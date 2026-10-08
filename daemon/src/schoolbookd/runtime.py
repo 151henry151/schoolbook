@@ -316,6 +316,22 @@ class Runtime:
             if self.catalog is None:
                 return {"candidates": []}
             return {"candidates": self.catalog.search(str(args["query"]))}
+        if name == "switch_voice":
+            from schoolbookd.providers.openai_realtime import DEFAULT_TUTOR_VOICE, next_voice
+
+            current = self.store.get_setting("tutor_voice", DEFAULT_TUTOR_VOICE)
+            current_voice = current if isinstance(current, str) else DEFAULT_TUTOR_VOICE
+            voice = next_voice(current_voice, str(args.get("hint", "")))
+            self.store.put_setting("tutor_voice", voice, actor="tutor")
+            return {"voice": voice, "reconnect": True}
+        if name == "set_tutor_name":
+            from schoolbookd.providers.openai_realtime import normalize_tutor_name
+
+            chosen = normalize_tutor_name(str(args.get("name", "")))
+            if not chosen:
+                return {"error": "name must be a short first name"}
+            self.store.put_setting("tutor_name", chosen, actor="tutor")
+            return {"name": chosen, "update_instructions": True}
         if name == "vet_video":
             if self.catalog is None:
                 return {"verdict": "unknown"}

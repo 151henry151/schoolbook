@@ -62,6 +62,34 @@ test("whenIdle waits until queued audio finishes", async () => {
   expect(idle).toBe(true);
 });
 
+test("interrupt makes the queue idle so a fresh listen can start", async () => {
+  const hold = { finish: () => {} };
+  const played: string[] = [];
+  const queue = new PlaybackQueue({
+    play: async (turnId) => {
+      played.push(turnId);
+      if (turnId === "live") {
+        await new Promise<void>((resolve) => {
+          hold.finish = resolve;
+        });
+      }
+    },
+    stop: () => {
+      played.push("stop");
+    },
+  });
+  void queue.enqueue("live", decodePcm16("AAA="), 16000);
+  void queue.enqueue("live", decodePcm16("AAA="), 16000);
+  await vi.waitFor(() => expect(played).toContain("live"));
+  expect(queue.isIdle()).toBe(false);
+  queue.interrupt();
+  expect(queue.isIdle()).toBe(true);
+  hold.finish();
+  await queue.enqueue("fresh", decodePcm16("AAA="), 16000);
+  expect(played).toContain("fresh");
+  expect(played).toContain("stop");
+});
+
 test("stale chunks from a cancelled turn are dropped", async () => {
   const played: string[] = [];
   const queue = new PlaybackQueue({

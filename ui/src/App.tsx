@@ -37,12 +37,15 @@ export function App() {
   const [draft, setDraft] = useState("");
   const [socket, setSocket] = useState<WebSocket | null>(null);
   const [status, setStatus] = useState("Listening");
+  const [listenPaused, setListenPaused] = useState(false);
+  const listenPausedRef = useRef(false);
   const [voice, setVoice] = useState("pipeline");
   const voiceRef = useRef("pipeline");
   const holdStarted = useRef<number | null>(null);
   const hands = useRef<HandsFreeState>(armed());
   const seq = useRef(0);
   const speaking = useRef(false);
+  const freshListen = useRef(false);
   const queue = useRef(new PlaybackQueue(webAudioPlayer()));
   const socketRef = useRef<WebSocket | null>(null);
   const capture = useRef<AudioContext | null>(null);
@@ -102,6 +105,7 @@ export function App() {
           if (message.voice) setVoice(message.voice);
         }
         if (message.type === "transcript" && message.text) {
+          if (freshListen.current && message.role === "tutor") return;
           setTalk((current) => nextTalkPair(current, message.role ?? "", message.text ?? ""));
           if (message.role === "tutor") {
             speaking.current = true;
@@ -109,6 +113,7 @@ export function App() {
           }
         }
         if (message.type === "audio_chunk" && message.turn_id && message.pcm_b64) {
+          if (freshListen.current) return;
           speaking.current = true;
           setStatus("Talking");
           const pcm = decodePcm16(message.pcm_b64);
@@ -156,14 +161,19 @@ export function App() {
         if (message.type === "state" && message.name === "parent_unlock") setUnlock(true);
         if (message.type === "state" && message.name === "thinking") setStatus("Thinking");
         if (message.type === "state" && message.name === "speaking") {
+          if (freshListen.current || listenPausedRef.current) return;
           speaking.current = true;
           setStatus("Talking");
         }
         if (message.type === "state" && message.name === "listening") {
+          if (listenPausedRef.current) return;
           const finish = () => {
             speaking.current = false;
             hands.current = armIfWaiting(hands.current);
-            if (message.detail === "hearing") setSpokenIndex(-1);
+            if (message.detail === "hearing") {
+              freshListen.current = false;
+              setSpokenIndex(-1);
+            }
             setStatus(message.detail === "hearing" ? "I hear you" : "Listening");
           };
           if (message.detail === "hearing") {
@@ -185,7 +195,7 @@ export function App() {
   }, []);
 
   useEffect(() => {
-    if (phase !== "talk" || (videoId && !videoPaused)) return;
+    if (phase !== "talk" || listenPaused || (videoId && !videoPaused)) return;
     let stop: (() => void) | undefined;
     void startMic((pcm, dtMs) => {
       const ws = socketRef.current;
@@ -247,10 +257,33 @@ export function App() {
         setStatus("I cannot hear the microphone");
       });
     return () => stop?.();
-  }, [phase, voice, videoId, videoPaused]);
+  }, [phase, voice, videoId, videoPaused, listenPaused]);
 
   function send(message: object) {
     socket?.send(JSON.stringify(message));
+  }
+
+  function resetListen() {
+    queue.current.interrupt();
+    speaking.current = false;
+    freshListen.current = true;
+    hands.current = armed();
+    vad.current = createVad();
+    seq.current = 0;
+    pendingVideo.current = "";
+    pendingPicture.current = "";
+    listenPausedRef.current = false;
+    setListenPaused(false);
+    setSpokenIndex(-1);
+    setStatus("Listening");
+    send({ type: "talk_start", turn_id: crypto.randomUUID() });
+  }
+
+  function pauseListen() {
+    listenPausedRef.current = true;
+    setListenPaused(true);
+    setStatus("Paused");
+    send({ type: "talk_start", turn_id: crypto.randomUUID() });
   }
 
   function sendText() {
@@ -346,6 +379,50 @@ export function App() {
       <button type="button" className="home-button" onClick={() => send({ type: "home" })}>
         Home
       </button>
+      {!(videoId && !videoPaused) ? (
+        <div className={(videoId && videoPaused) || pictureId ? "talk-controls on-media" : "talk-controls"}>
+          <button type="button" className="listen-button" aria-label="start talking" onClick={resetListen}>
+            <svg viewBox="0 0 64 64" aria-hidden="true">
+              <rect x="24" y="8" width="16" height="28" rx="8" fill="currentColor" />
+              <path
+                d="M18 30a14 14 0 0 0 28 0"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="5"
+                strokeLinecap="round"
+              />
+              <path
+                d="M32 44v10M22 54h20"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="5"
+                strokeLinecap="round"
+              />
+            </svg>
+          </button>
+          <button type="button" className="stop-button" aria-label="stop" onClick={pauseListen}>
+            <svg viewBox="0 0 64 64" aria-hidden="true">
+              <polygon
+                points="20,4 44,4 60,20 60,44 44,60 20,60 4,44 4,20"
+                fill="#d12c2c"
+                stroke="#fff"
+                strokeWidth="4"
+                strokeLinejoin="round"
+              />
+              <text
+                x="32"
+                y="38"
+                textAnchor="middle"
+                fill="#fff"
+                fontSize="13"
+                fontWeight="700"
+              >
+                STOP
+              </text>
+            </svg>
+          </button>
+        </div>
+      ) : null}
       {dev ? (
         <form
           onSubmit={(event) => {

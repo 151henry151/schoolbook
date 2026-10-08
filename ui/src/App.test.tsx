@@ -34,6 +34,30 @@ beforeEach(() => {
     vi.fn(async () => ({ ok: true, json: async () => ({ token: "boot" }) })),
   );
   vi.stubGlobal("WebSocket", FakeSocket);
+  vi.stubGlobal(
+    "AudioContext",
+    class {
+      resume() {
+        return Promise.resolve();
+      }
+      createBuffer() {
+        return { getChannelData: () => new Float32Array(8) };
+      }
+      createBufferSource() {
+        return {
+          connect() {},
+          start() {
+            queueMicrotask(() => this.onended?.());
+          },
+          buffer: null,
+          onended: null as (() => void) | null,
+        };
+      }
+      get destination() {
+        return {};
+      }
+    },
+  );
 });
 
 afterEach(() => {
@@ -163,6 +187,121 @@ test("a picture message shows the image and keeps the microphone on", async () =
   expect(socket.send.mock.calls.some((call) => String(call[0]).includes("audio_frame"))).toBe(true);
   fireEvent.click(screen.getByRole("button", { name: "close picture" }));
   expect(screen.queryByRole("img", { name: "dinosaur" })).toBeNull();
+});
+
+test("the microphone button stops talk and starts a fresh listen", async () => {
+  const listeners: Array<(pcm: Int16Array, dtMs: number) => void> = [];
+  vi.mocked(startMic).mockImplementation(async (onFrame) => {
+    listeners.push(onFrame);
+    return () => {
+      const index = listeners.indexOf(onFrame);
+      if (index >= 0) listeners.splice(index, 1);
+    };
+  });
+  render(<App />);
+  await vi.waitFor(() => expect(sockets.length).toBe(1));
+  const socket = sockets[0];
+  act(() => {
+    socket.onmessage?.({
+      data: JSON.stringify({ type: "hello_ok", voice: "realtime", learner_name: "Arum" }),
+    } as MessageEvent);
+  });
+  fireEvent.click(await screen.findByRole("button", { name: "Arum" }));
+  await vi.waitFor(() => expect(listeners.length).toBe(1));
+  act(() => {
+    socket.onmessage?.({
+      data: JSON.stringify({ type: "state", name: "speaking" }),
+    } as MessageEvent);
+    socket.onmessage?.({
+      data: JSON.stringify({
+        type: "audio_chunk",
+        turn_id: "live",
+        pcm_b64: "AAA=",
+        sample_rate: 24000,
+      }),
+    } as MessageEvent);
+  });
+  socket.send.mockClear();
+  act(() => {
+    listeners[0](new Int16Array(8), 20);
+  });
+  expect(socket.send.mock.calls.some((call) => String(call[0]).includes("audio_frame"))).toBe(false);
+  fireEvent.click(screen.getByRole("button", { name: "start talking" }));
+  expect(await screen.findByText("Listening")).toBeTruthy();
+  expect(
+    socket.send.mock.calls.some((call) => {
+      const body = JSON.parse(String(call[0])) as { type?: string };
+      return body.type === "talk_start";
+    }),
+  ).toBe(true);
+  socket.send.mockClear();
+  act(() => {
+    listeners[0](new Int16Array(8), 20);
+  });
+  expect(socket.send.mock.calls.some((call) => String(call[0]).includes("audio_frame"))).toBe(true);
+});
+
+test("the stop button pauses listening until the microphone starts it again", async () => {
+  const listeners: Array<(pcm: Int16Array, dtMs: number) => void> = [];
+  vi.mocked(startMic).mockImplementation(async (onFrame) => {
+    listeners.push(onFrame);
+    return () => {
+      const index = listeners.indexOf(onFrame);
+      if (index >= 0) listeners.splice(index, 1);
+    };
+  });
+  render(<App />);
+  await vi.waitFor(() => expect(sockets.length).toBe(1));
+  const socket = sockets[0];
+  act(() => {
+    socket.onmessage?.({
+      data: JSON.stringify({ type: "hello_ok", voice: "realtime", learner_name: "Arum" }),
+    } as MessageEvent);
+  });
+  fireEvent.click(await screen.findByRole("button", { name: "Arum" }));
+  await vi.waitFor(() => expect(listeners.length).toBe(1));
+  expect(screen.getByRole("button", { name: "stop" })).toBeTruthy();
+  socket.send.mockClear();
+  act(() => {
+    listeners[0](new Int16Array(8), 20);
+  });
+  expect(socket.send.mock.calls.some((call) => String(call[0]).includes("audio_frame"))).toBe(true);
+  fireEvent.click(screen.getByRole("button", { name: "stop" }));
+  expect(await screen.findByText("Paused")).toBeTruthy();
+  await vi.waitFor(() => expect(listeners.length).toBe(0));
+  socket.send.mockClear();
+  fireEvent.click(screen.getByRole("button", { name: "start talking" }));
+  expect(await screen.findByText("Listening")).toBeTruthy();
+  await vi.waitFor(() => expect(listeners.length).toBe(1));
+  act(() => {
+    listeners[0](new Int16Array(8), 20);
+  });
+  expect(socket.send.mock.calls.some((call) => String(call[0]).includes("audio_frame"))).toBe(true);
+});
+
+test("the microphone button stays available over a paused video and hides while it plays", async () => {
+  render(<App />);
+  await vi.waitFor(() => expect(sockets.length).toBe(1));
+  const socket = sockets[0];
+  act(() => {
+    socket.onmessage?.({
+      data: JSON.stringify({ type: "hello_ok", voice: "realtime", learner_name: "Arum" }),
+    } as MessageEvent);
+  });
+  fireEvent.click(await screen.findByRole("button", { name: "Arum" }));
+  expect(screen.getByRole("button", { name: "start talking" })).toBeTruthy();
+  expect(screen.getByRole("button", { name: "stop" })).toBeTruthy();
+  act(() => {
+    socket.onmessage?.({
+      data: JSON.stringify({ type: "video", action: "play", video_id: "abcdefghijk" }),
+    } as MessageEvent);
+  });
+  expect(await screen.findByTitle("video")).toBeTruthy();
+  expect(screen.queryByRole("button", { name: "start talking" })).toBeNull();
+  expect(screen.queryByRole("button", { name: "stop" })).toBeNull();
+  fireEvent.click(screen.getByLabelText("pause or play"));
+  expect(screen.getByRole("button", { name: "start talking" })).toBeTruthy();
+  expect(screen.getByRole("button", { name: "stop" })).toBeTruthy();
 });
 
 test("a picture over a paused video keeps the player so resume can continue", async () => {

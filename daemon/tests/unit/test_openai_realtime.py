@@ -8,13 +8,18 @@ from schoolbookd.providers.openai_realtime import (
     REALTIME_TOOLS,
     RealtimeMapper,
     RealtimeTalk,
+    child_speech_decision,
     clarify_speech_note,
     connect_headers,
+    extract_child_speech,
     looks_like_child_speech,
+    looks_like_fantasy,
     paused_video_note,
+    real_world_nudge,
     resample_pcm16,
     session_update,
     spoken_child_instructions,
+    spoken_clarify,
     video_watch_briefing,
 )
 
@@ -28,7 +33,12 @@ def test_session_update_disables_barge_in_and_uses_server_vad() -> None:
     assert turn["type"] == "server_vad"
     assert turn["interrupt_response"] is False
     assert turn["create_response"] is False
+    assert int(turn["silence_duration_ms"]) >= 1500
+    assert float(turn["threshold"]) >= 0.55
     assert session["tools"][0]["name"] == "show_board"
+    assert session["audio"]["output"]["voice"] == "marin"
+    cedar = session_update(instructions="Be a computer helper.", tools=[], voice="cedar")
+    assert cedar["session"]["audio"]["output"]["voice"] == "cedar"
 
 
 def test_audio_delta_becomes_a_child_audio_chunk() -> None:
@@ -171,6 +181,8 @@ def test_realtime_tools_do_not_offer_written_menus() -> None:
     assert "play_video" in names
     assert "video_control" in names
     assert "show_picture" in names
+    assert "switch_voice" in names
+    assert "set_tutor_name" in names
 
 
 def test_spoken_instructions_tell_the_tutor_to_find_videos_itself() -> None:
@@ -182,6 +194,31 @@ def test_spoken_instructions_tell_the_tutor_to_find_videos_itself() -> None:
     assert "video id" in lowered or "video_id" in lowered
     assert "never ask" in lowered
     assert "show_picture" in text
+    assert "made-up" in lowered or "story" in lowered or "pretend" in lowered
+    assert "real" in lowered
+
+
+def test_fantasy_talk_gets_a_gentle_nudge_toward_real_things() -> None:
+    assert looks_like_fantasy("Tell me about Elsa from Frozen")
+    assert looks_like_fantasy("Show me a Pokemon video")
+    assert not looks_like_fantasy("How do airplanes fly?")
+    assert not looks_like_fantasy("What does a komodo dragon eat?")
+    note = real_world_nudge("Tell me about Elsa", name="Arum")
+    assert note is not None
+    lowered = note.lower()
+    assert "arum" in lowered
+    assert "real" in lowered
+    assert real_world_nudge("How do airplanes fly?") is None
+    mapper = RealtimeMapper(child_name="Arum")
+    _ui, outbound = mapper.handle(
+        {
+            "type": "conversation.item.input_audio_transcription.completed",
+            "transcript": "Tell me about Elsa.",
+        }
+    )
+    briefing = str(outbound[0]["item"]["content"][0]["text"])
+    assert "real" in briefing.lower()
+    assert outbound[-1]["type"] == "response.create"
 
 
 def test_looks_like_child_speech_rejects_garbled_words() -> None:
@@ -195,12 +232,39 @@ def test_looks_like_child_speech_rejects_garbled_words() -> None:
     assert not looks_like_child_speech("blargh zzzz qkpt")
 
 
+def test_extract_child_speech_drops_fillers_and_keeps_the_sentence() -> None:
+    assert extract_child_speech("Um, how big is a blue whale?").lower() == "how big is a blue whale?"
+    assert extract_child_speech("uh uh yes") == "yes"
+    assert child_speech_decision("um") == ("wait", "")
+    assert child_speech_decision("Uh") == ("wait", "")
+    assert child_speech_decision("Ča") == ("wait", "")
+    assert child_speech_decision("人不气") == ("wait", "")
+    assert child_speech_decision("Um, show me a dinosaur.") == ("ready", "show me a dinosaur.")
+    assert child_speech_decision("asdfkj") == ("wait", "")
+    assert child_speech_decision("asdfkj mmm fff")[0] == "unclear"
+
+
+def test_filler_only_transcript_keeps_listening() -> None:
+    mapper = RealtimeMapper()
+    ui, outbound = mapper.handle(
+        {
+            "type": "conversation.item.input_audio_transcription.completed",
+            "transcript": "Um",
+        }
+    )
+    assert ui == []
+    assert outbound == []
+
+
 def test_unclear_transcript_asks_the_child_to_confirm() -> None:
+    said = spoken_clarify("asdfkj whale bus")
+    assert "asdfkj whale bus" in said.lower()
+    assert "sounded like" in said.lower()
+    assert "is that what you said" in said.lower()
     note = clarify_speech_note("asdfkj whale bus")
     lowered = note.lower()
+    assert "out loud" in lowered or "cannot read" in lowered
     assert "asdfkj whale bus" in lowered
-    assert "sounded like" in lowered
-    assert "is that what you said" in lowered
     mapper = RealtimeMapper()
     ui, outbound = mapper.handle(
         {
@@ -208,12 +272,17 @@ def test_unclear_transcript_asks_the_child_to_confirm() -> None:
             "transcript": "asdfkj mmm fff",
         }
     )
-    assert ui[0]["text"] == "asdfkj mmm fff"
-    assert outbound[0]["type"] == "conversation.item.create"
-    briefing = str(outbound[0]["item"]["content"][0]["text"])
-    assert "sounded like" in briefing.lower()
-    assert "asdfkj mmm fff" in briefing.lower()
-    assert outbound[-1]["type"] == "response.create"
+    roles = [str(message.get("role")) for message in ui]
+    assert "child" in roles
+    assert "tutor" in roles
+    tutor = next(message for message in ui if message.get("role") == "tutor")
+    assert "asdfkj fff" in str(tutor["text"]).lower()
+    assert "sounded like" in str(tutor["text"]).lower()
+    create = outbound[-1]
+    assert create["type"] == "response.create"
+    spoken = json.dumps(create).lower()
+    assert "asdfkj fff" in spoken
+    assert "out loud" in spoken or "speak" in spoken
 
 
 def test_clear_transcript_does_not_force_a_clarify() -> None:
@@ -284,7 +353,8 @@ def test_spoken_instructions_prefer_stretch_educational_videos() -> None:
     assert "briefing" in lowered or "six-year-old" in lowered
     assert "paused" in lowered
     assert "keep watching" in lowered or "resume" in lowered
-    assert "sounded like" in lowered
+    assert "um" in lowered
+    assert "is that what you said" in lowered
 
 
 def test_spoken_instructions_sound_like_a_person_not_a_safety_officer() -> None:
@@ -421,6 +491,152 @@ def test_spoken_instructions_forbid_written_menus() -> None:
     assert "cannot read" in text.lower()
     assert "ask_choice" in text.lower() or "written" in text.lower()
     assert "spoken" in text.lower()
+
+
+def test_reset_listen_cancels_speech_and_clears_the_buffer() -> None:
+    mapper = RealtimeMapper()
+    mapper.child_partial = "um hello"
+    mapper.tutor_partial = "Let me tell"
+    mapper.pending_video = {"type": "video", "action": "play", "video_id": "abcdefghijk"}
+    mapper.hold_video = True
+    ui, outbound = mapper.reset_listen()
+    assert ui == [{"type": "state", "name": "listening", "detail": ""}]
+    assert {"type": "response.cancel"} in outbound
+    assert {"type": "input_audio_buffer.clear"} in outbound
+    leftover, create = mapper.handle(
+        {
+            "type": "conversation.item.input_audio_transcription.completed",
+            "transcript": "hello dinosaurs",
+        }
+    )
+    assert leftover == []
+    assert create == []
+    audio, _ = mapper.handle({"type": "response.output_audio.delta", "delta": "AQID"})
+    assert audio == []
+    done, _ = mapper.handle({"type": "response.done"})
+    assert all(item.get("type") != "video" for item in done)
+
+
+def test_reset_listen_lets_the_next_spoken_turn_through() -> None:
+    mapper = RealtimeMapper()
+    mapper.reset_listen()
+    started, _ = mapper.handle({"type": "input_audio_buffer.speech_started"})
+    assert started[0] == {"type": "state", "name": "listening", "detail": "hearing"}
+    ui, outbound = mapper.handle(
+        {
+            "type": "conversation.item.input_audio_transcription.completed",
+            "transcript": "how big is a blue whale",
+        }
+    )
+    assert ui[0]["text"] == "how big is a blue whale"
+    assert any(item.get("type") == "response.create" for item in outbound)
+    mapper.handle({"type": "response.created"})
+    audio, _ = mapper.handle({"type": "response.output_audio.delta", "delta": "AQID"})
+    assert audio[0]["type"] == "audio_chunk"
+
+
+def test_reset_listen_sends_cancel_and_clear_on_the_socket() -> None:
+    class FakeSocket:
+        def __init__(self) -> None:
+            self.sent: list[dict[str, object]] = []
+
+        async def send(self, raw: str) -> None:
+            self.sent.append(json.loads(raw))
+
+    async def run() -> None:
+        talk = RealtimeTalk(
+            api_key="sk-test",
+            instructions="help",
+            execute=lambda _name, _args: {},
+        )
+        talk._socket = FakeSocket()
+        ui = await talk.reset_listen()
+        assert ui[0]["name"] == "listening"
+        kinds = [item["type"] for item in talk._socket.sent]
+        assert "response.cancel" in kinds
+        assert "input_audio_buffer.clear" in kinds
+
+    asyncio.run(run())
+
+
+def test_switch_voice_reconnects_instead_of_speaking_in_the_old_voice() -> None:
+    def execute(name: str, args: dict[str, object]) -> dict[str, object]:
+        assert name == "switch_voice"
+        return {"voice": "cedar", "reconnect": True}
+
+    mapper = RealtimeMapper()
+    _ui, outbound = mapper.handle(
+        {
+            "type": "response.function_call_arguments.done",
+            "call_id": "c1",
+            "name": "switch_voice",
+            "arguments": '{"hint":"somebody else"}',
+        },
+        execute=execute,
+    )
+    reconnects = [
+        item for item in outbound if item.get("type") == "schoolbook.reconnect"
+    ]
+    assert reconnects and reconnects[0].get("voice") == "cedar"
+    assert not any(item.get("type") == "response.create" for item in outbound)
+
+
+def test_set_tutor_name_asks_for_an_instruction_update() -> None:
+    def execute(name: str, args: dict[str, object]) -> dict[str, object]:
+        return {"name": "Pixel", "update_instructions": True}
+
+    mapper = RealtimeMapper()
+    _ui, outbound = mapper.handle(
+        {
+            "type": "response.function_call_arguments.done",
+            "call_id": "c2",
+            "name": "set_tutor_name",
+            "arguments": '{"name":"Pixel"}',
+        },
+        execute=execute,
+    )
+    assert any(item.get("type") == "schoolbook.rename" and item.get("name") == "Pixel" for item in outbound)
+    assert any(item.get("type") == "response.create" for item in outbound)
+
+
+def test_reconnect_opens_a_new_session_with_the_new_voice() -> None:
+    class FakeSocket:
+        def __init__(self) -> None:
+            self.sent: list[dict[str, object]] = []
+            self._incoming = asyncio.Queue[str]()
+            self.closed = False
+
+        async def send(self, raw: str) -> None:
+            self.sent.append(json.loads(raw))
+
+        async def recv(self) -> str:
+            return await self._incoming.get()
+
+        async def close(self) -> None:
+            self.closed = True
+
+    sockets: list[FakeSocket] = []
+
+    async def run() -> None:
+        async def connect(_key: str) -> FakeSocket:
+            socket = FakeSocket()
+            sockets.append(socket)
+            await socket._incoming.put(json.dumps({"type": "session.created"}))
+            return socket
+
+        talk = RealtimeTalk(
+            api_key="sk-test",
+            instructions="help",
+            execute=lambda _name, _args: {},
+            connect=connect,
+            voice="marin",
+        )
+        await talk.start()
+        await talk.reconnect("cedar")
+        assert sockets[0].closed is True
+        assert sockets[1].sent[0]["session"]["audio"]["output"]["voice"] == "cedar"
+
+    asyncio.run(run())
 
 
 def test_start_waits_for_session_created_then_updates() -> None:
