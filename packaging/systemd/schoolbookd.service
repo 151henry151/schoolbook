@@ -1,0 +1,13 @@
+[Unit]
+Description=Schoolbook tutor daemon
+After=network-online.target
+
+[Service]
+User=schoolbook
+Group=schoolbook
+ExecStart=/usr/bin/schoolbookd serve --config /etc/schoolbook/schoolbook.yaml
+Restart=on-failure
+NoNewPrivileges=true
+
+[Install]
+WantedBy=multi-user.target

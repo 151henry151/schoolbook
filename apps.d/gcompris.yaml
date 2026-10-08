@@ -1,0 +1,79 @@
+id: gcompris
+name: GCompris
+exec: [gcompris-qt, --enable-kioskmode, -f]
+activity_arg: ["--launch", "{activity}"]
+level_arg: ["--start-level", "{level}"]
+observe: true
+activities:
+  - id: enumerate
+    title: Count the items
+    skills: [math.counting.to20, counting]
+    ages: [4, 7]
+  - id: number_sequence
+    title: Number sequence
+    skills: [math.counting.to20, counting]
+    ages: [4, 8]
+  - id: adjacent_numbers
+    title: Adjacent numbers
+    skills: [math.counting.to20, counting]
+    ages: [5, 8]
+  - id: smallnumbers
+    title: Small numbers
+    skills: [math.counting.to20, counting]
+    ages: [4, 7]
+  - id: algebra_plus
+    title: Addition practice
+    skills: [math.addition.within10]
+    ages: [5, 8]
+  - id: click_on_letter
+    title: Click on a letter
+    skills: [letters]
+    ages: [4, 7]
+  - id: alphabet-sequence
+    title: Alphabet sequence
+    skills: [letters]
+    ages: [4, 7]
+  - id: drawletters
+    title: Draw letters
+    skills: [letters]
+    ages: [4, 8]
+  - id: memory
+    title: Memory cards
+    skills: [memory]
+    ages: [4, 8]
+  - id: colors
+    title: Colors
+    skills: [colors]
+    ages: [3, 7]
+  - id: maze
+    title: Maze
+    skills: [maze]
+    ages: [5, 8]
+  - id: melody
+    title: Melody
+    skills: [music]
+    ages: [4, 8]
+  - id: erase
+    title: Erase
+    ages: [3, 6]
+  - id: clickgame
+    title: Click on me
+    ages: [2, 6]
+  - id: geography
+    title: Geography
+    ages: [5, 8]
+  - id: clockgame
+    title: Clock
+    ages: [5, 8]
+  - id: money
+    title: Money
+    ages: [5, 8]
+  - id: baby_tangram
+    title: Tangram
+    ages: [4, 7]
+  - id: explore_farm_animals
+    title: Farm animals
+    ages: [4, 8]
+  - id: left_right_click
+    title: Left and right click
+    ages: [4, 7]
