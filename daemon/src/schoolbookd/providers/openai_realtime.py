@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import array
 import json
+import re
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from typing import Any
@@ -30,8 +31,22 @@ def spoken_child_instructions(core: str, age_text: str, name: str) -> str:
                 "Do not call ask_choice. Ask one spoken question and wait. "
                 "Pictures and videos are fine. Keep turns short and warm. "
                 "Talk the way a kind person talks to a six-year-old. "
-                "When the child asks to watch something, say you will put on a video about that thing, "
-                "then call search_videos, then vet_video, then play_video. "
+                "When the child asks to watch something, treat it as a parent briefing: "
+                "you have a six-year-old who wants a video about that topic. "
+                "Pick something educational that teaches history or science of the topic, "
+                "then call search_videos, vet_video, and play_video. "
+                "Say you will put on a video about that thing. "
+                "If the child wants a picture, call show_picture with the topic. "
+                "Do not call show_board with a made-up image_id. "
+                "When searching videos, use a short query like dinosaur fossils. "
+                "Search once, vet the best candidate, and play it. Do not talk between those tools. "
+                "If the child's words do not make sense, say: "
+                "It sounded like you said those words. Is that what you said? Then wait. Do not guess. "
+                "If a video is paused and the child talks, listen. "
+                "If they ask a question about the video, answer it and call show_picture if a picture helps. "
+                "Then ask if they want to keep watching. "
+                "If they say yes, call video_control resume. If they say no, call video_control stop. "
+                "For a different video, search and play a new one. "
                 "Never ask the child or a grown-up for a video ID. "
                 "Do not say safe, vetted, approved, or mention a video ID out loud."
             ),
@@ -41,6 +56,86 @@ def spoken_child_instructions(core: str, age_text: str, name: str) -> str:
 
 OUTPUT_RATE = 24000
 INPUT_RATE = 24000
+
+_TOPIC_PATTERNS = (
+    re.compile(
+        r"(?:show me|can i (?:see|watch)|i want (?:to )?(?:see|watch)|watch|put on)\s+"
+        r"(?:some |a |an )?(.+?)\s+videos?\b",
+        re.I,
+    ),
+    re.compile(r"(?:videos?|movies?|films?)\s+(?:of|about|on)\s+(.+)", re.I),
+    re.compile(
+        r"(?:show me|watch|put on)\s+(?:a |an |some )?(?:video|movie|film)s?\s+(?:of|about|on)?\s*(.+)",
+        re.I,
+    ),
+)
+
+
+def video_topic(text: str) -> str | None:
+    stripped = text.strip()
+    if not stripped:
+        return None
+    for pattern in _TOPIC_PATTERNS:
+        match = pattern.search(stripped)
+        if match:
+            topic = match.group(1).strip(" .?!,")
+            topic = re.sub(r"^(some|a|an|the)\s+", "", topic, flags=re.I)
+            if topic:
+                return topic
+    return None
+
+
+_SHORT_OK = {"a", "i", "no", "yes", "ok", "hi", "hey", "wow", "why", "how", "who", "what"}
+
+
+def looks_like_child_speech(text: str) -> bool:
+    words = re.findall(r"[a-zA-Z']+", text or "")
+    if not words:
+        return False
+    real = 0
+    for word in words:
+        low = word.lower()
+        if low in _SHORT_OK or (len(low) >= 3 and re.search(r"[aeiouy]", low)):
+            real += 1
+    return real > 0 and real / len(words) >= 0.5
+
+
+def clarify_speech_note(text: str) -> str:
+    heard = " ".join((text or "").split())
+    if not heard:
+        return (
+            "The child's words were not clear. "
+            "Say you did not catch that and ask them to say it again. Do not guess."
+        )
+    return (
+        f'It sounded like the child said: "{heard}". That may be wrong. '
+        f"Ask out loud: It sounded like you said {heard}. Is that what you said? "
+        "Then wait. Do not start a video, picture, or new topic until they confirm or say it again."
+    )
+
+
+def paused_video_note() -> str:
+    return (
+        "The child paused the video. It is still there, paused. Listen. "
+        "If they ask a question about the video, answer it. Call show_picture if a picture helps. "
+        "Then ask if they want to keep watching. "
+        "If they say yes, call video_control resume. Do not start the video over. "
+        "If they say no, or want something else, call video_control stop and then help them. "
+        "If they want a different video, search, vet, and play a new one."
+    )
+
+
+def video_watch_briefing(child_text: str, *, name: str = "the child") -> str | None:
+    topic = video_topic(child_text)
+    if topic is None:
+        return None
+    return (
+        f"You have a six-year-old named {name} who wants to watch a video about {topic}. "
+        f"Pick something educational that will teach him something good about the history of {topic} "
+        f"or the science behind {topic}. Pick out a good educational video from YouTube and play it. "
+        f"Do not pick a baby song, nursery cartoon, or Cocomelon-style show. "
+        f"When you speak to him, just say you will put on a video about {topic}."
+    )
 
 Execute = Callable[[str, dict[str, object]], dict[str, object]]
 Emit = Callable[[dict[str, object]], Awaitable[None]]
@@ -79,7 +174,7 @@ def session_update(*, instructions: str, tools: list[dict[str, object]]) -> dict
                     "format": {"type": "audio/pcm", "rate": INPUT_RATE},
                     "turn_detection": {
                         "type": "server_vad",
-                        "create_response": True,
+                        "create_response": False,
                         "interrupt_response": False,
                         "silence_duration_ms": 700,
                     },
@@ -110,8 +205,10 @@ REALTIME_TOOLS: list[dict[str, object]] = [
         "type": "function",
         "name": "search_videos",
         "description": (
-            "Search YouTube for a video the child asked to watch. "
-            "Returns candidate video_id values. Never ask anyone for a video ID."
+            "Search YouTube for a high-quality educational video about the child's topic, "
+            "aimed at ages 10-12. Prefer documentaries and explainers. "
+            "Do not pick baby songs or nursery cartoons. Returns candidate video_id values. "
+            "Never ask anyone for a video ID."
         ),
         "parameters": {
             "type": "object",
@@ -142,6 +239,29 @@ REALTIME_TOOLS: list[dict[str, object]] = [
             "required": ["video_id"],
         },
     },
+    {
+        "type": "function",
+        "name": "video_control",
+        "description": "Pause, resume, or stop the video that is on screen. Use stop when the child wants to do something else.",
+        "parameters": {
+            "type": "object",
+            "properties": {"action": {"type": "string", "enum": ["pause", "resume", "stop"]}},
+            "required": ["action"],
+        },
+    },
+    {
+        "type": "function",
+        "name": "show_picture",
+        "description": (
+            "Make an educational picture of the child's topic and show it. "
+            "Use this instead of show_board when they ask to see what something looks like."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {"topic": {"type": "string"}},
+            "required": ["topic"],
+        },
+    },
 ]
 
 
@@ -149,6 +269,13 @@ REALTIME_TOOLS: list[dict[str, object]] = [
 class RealtimeMapper:
     turn_id: str = "live"
     seq: int = 0
+    child_name: str = "Arum"
+    pending_video: dict[str, object] | None = None
+    hold_video: bool = False
+    pending_picture: dict[str, object] | None = None
+    hold_picture: bool = False
+    child_partial: str = ""
+    tutor_partial: str = ""
 
     def append_audio(self, pcm_b64: str) -> dict[str, object]:
         return {"type": "input_audio_buffer.append", "audio": pcm_b64}
@@ -173,15 +300,104 @@ class RealtimeMapper:
         if kind == "error":
             return ([{"type": "state", "name": "listening", "detail": ""}], [])
         if kind == "input_audio_buffer.speech_started":
+            self.child_partial = ""
             return ([{"type": "state", "name": "listening", "detail": "hearing"}], [])
         if kind == "input_audio_buffer.speech_stopped":
             return ([{"type": "state", "name": "thinking", "detail": ""}], [])
         if kind == "response.done":
-            return ([{"type": "state", "name": "listening", "detail": ""}], [])
-        if kind == "conversation.item.input_audio_transcription.completed":
-            text = str(event.get("transcript", "")).strip()
-            if not text:
+            messages: list[dict[str, object]] = []
+            if self.pending_video is not None and self.hold_video:
+                self.hold_video = False
+            elif self.pending_video is not None:
+                messages.append(self.pending_video)
+                self.pending_video = None
+            if self.pending_picture is not None and self.hold_picture:
+                self.hold_picture = False
+            elif self.pending_picture is not None:
+                messages.append(self.pending_picture)
+                self.pending_picture = None
+            messages.append({"type": "state", "name": "listening", "detail": ""})
+            return (messages, [])
+        if kind == "conversation.item.input_audio_transcription.delta":
+            piece = str(event.get("delta") or event.get("transcript") or "")
+            if not piece:
                 return ([], [])
+            self.child_partial += piece
+            return (
+                [
+                    {
+                        "type": "transcript",
+                        "turn_id": self.turn_id,
+                        "role": "child",
+                        "text": self.child_partial,
+                        "partial": True,
+                    }
+                ],
+                [],
+            )
+        if kind in {"response.output_audio_transcript.delta", "response.audio_transcript.delta"}:
+            piece = str(event.get("delta") or event.get("transcript") or "")
+            if not piece:
+                return ([], [])
+            self.tutor_partial += piece
+            return (
+                [
+                    {
+                        "type": "transcript",
+                        "turn_id": self.turn_id,
+                        "role": "tutor",
+                        "text": self.tutor_partial,
+                        "partial": True,
+                    }
+                ],
+                [],
+            )
+        if kind == "conversation.item.input_audio_transcription.failed":
+            return (
+                [],
+                [
+                    {
+                        "type": "conversation.item.create",
+                        "item": {
+                            "type": "message",
+                            "role": "system",
+                            "content": [{"type": "input_text", "text": clarify_speech_note("")}],
+                        },
+                    },
+                    {"type": "response.create"},
+                ],
+            )
+        if kind == "conversation.item.input_audio_transcription.completed":
+            text = str(event.get("transcript", "")).strip() or self.child_partial.strip()
+            self.child_partial = ""
+            outbound: list[dict[str, object]] = []
+            if text and not looks_like_child_speech(text):
+                outbound.append(
+                    {
+                        "type": "conversation.item.create",
+                        "item": {
+                            "type": "message",
+                            "role": "system",
+                            "content": [{"type": "input_text", "text": clarify_speech_note(text)}],
+                        },
+                    }
+                )
+            else:
+                briefing = video_watch_briefing(text, name=self.child_name) if text else None
+                if briefing:
+                    outbound.append(
+                        {
+                            "type": "conversation.item.create",
+                            "item": {
+                                "type": "message",
+                                "role": "system",
+                                "content": [{"type": "input_text", "text": briefing}],
+                            },
+                        }
+                    )
+            outbound.append({"type": "response.create"})
+            if not text:
+                return ([], outbound)
             return (
                 [
                     {
@@ -192,10 +408,11 @@ class RealtimeMapper:
                         "partial": False,
                     }
                 ],
-                [],
+                outbound,
             )
         if kind in {"response.audio_transcript.done", "response.output_audio_transcript.done"}:
-            text = str(event.get("transcript", "")).strip()
+            text = str(event.get("transcript", "")).strip() or self.tutor_partial.strip()
+            self.tutor_partial = ""
             if not text:
                 return ([], [])
             return (
@@ -239,21 +456,46 @@ class RealtimeMapper:
         else:
             result = {"error": "no tool runner"}
         ui: list[dict[str, object]] = []
-        if name == "show_board":
+        if name == "show_board" and "error" not in result:
             elements = args.get("elements")
             if isinstance(elements, list):
                 ui.append({"type": "board", "turn_id": self.turn_id, "elements": elements})
+        elif name == "show_picture" and result.get("image_id") and "error" not in result:
+            self.pending_picture = {"type": "picture", "image_id": str(result["image_id"])}
+            self.hold_picture = True
         elif name == "play_video" and "playing" in result and "error" not in result:
-            ui.append(
-                {
+            self.pending_video = {
+                "type": "video",
+                "action": "play",
+                "video_id": str(result.get("playing") or args.get("video_id", "")),
+                "start_s": None,
+                "end_s": None,
+                "at_s": None,
+            }
+            self.hold_video = True
+        elif name == "video_control" and "error" not in result:
+            action = str(args.get("action"))
+            if action == "stop":
+                ui.append(
+                    {
+                        "type": "video",
+                        "action": "stop",
+                        "video_id": "",
+                        "start_s": None,
+                        "end_s": None,
+                        "at_s": None,
+                    }
+                )
+            elif action == "resume":
+                self.pending_video = {
                     "type": "video",
-                    "action": "play",
-                    "video_id": str(result.get("playing") or args.get("video_id", "")),
+                    "action": "resume",
+                    "video_id": "",
                     "start_s": None,
                     "end_s": None,
                     "at_s": None,
                 }
-            )
+                self.hold_video = True
         outbound: list[dict[str, object]] = [
             {
                 "type": "conversation.item.create",
@@ -300,6 +542,22 @@ class RealtimeTalk:
         stretched = resample_pcm16(pcm, sample_rate, INPUT_RATE)
         payload = self.mapper.append_audio(base64.b64encode(stretched).decode("ascii"))
         await self._socket.send(json.dumps(payload))
+
+    async def add_system_note(self, text: str) -> None:
+        if self._socket is None or not text.strip():
+            return
+        await self._socket.send(
+            json.dumps(
+                {
+                    "type": "conversation.item.create",
+                    "item": {
+                        "type": "message",
+                        "role": "system",
+                        "content": [{"type": "input_text", "text": text}],
+                    },
+                }
+            )
+        )
 
     async def pump(self, emit: Emit) -> None:
         if self._socket is None:

@@ -1,5 +1,13 @@
+@font-face {
+  font-family: Fredoka;
+  font-style: normal;
+  font-weight: 400 600;
+  font-display: swap;
+  src: url("./fonts/Fredoka-Variable.ttf") format("truetype");
+}
+
 :root {
-  font-family: "Segoe UI", sans-serif;
+  font-family: Fredoka, "Comic Sans MS", "Chalkboard SE", ui-rounded, sans-serif;
   color: #1c1915;
   background: #f6efe2;
 }
@@ -8,9 +16,65 @@ button { min-height: 64px; min-width: 64px; font-size: 1.4rem; }
 .home, .talk { min-height: 100vh; display: grid; place-items: center; gap: 1rem; }
 .avatar, .talk-button { width: 12rem; height: 12rem; border-radius: 999px; border: 0; background: #e07a3d; color: white; }
 .big-text, .equation, .dots { font-size: 4rem; margin: 0; }
-.transcript { font-size: 2rem; }
+.talk-lines {
+  display: grid;
+  gap: 1rem;
+  width: min(40rem, 90vw);
+  justify-items: stretch;
+}
+.talk-line {
+  display: grid;
+  grid-template-columns: 3.2rem 1fr;
+  align-items: start;
+  gap: 0.8rem;
+  margin: 0;
+  font-size: 2rem;
+  line-height: 1.25;
+  font-weight: 600;
+}
+.talk-line.child { color: #c45c12; }
+.talk-line.tutor { color: #2a6f7f; }
+.talk-icon {
+  width: 3.2rem;
+  height: 3.2rem;
+  border-radius: 999px;
+  display: grid;
+  place-items: center;
+  color: #fff;
+  font-size: 1.6rem;
+}
+.talk-icon.child { background: #e07a3d; }
+.talk-icon.tutor { background: #3a8ea3; }
+.talk-lines.on-video,
+.status.on-video {
+  position: fixed;
+  left: 1rem;
+  right: 5.5rem;
+  z-index: 26;
+}
+.talk-lines.on-video {
+  bottom: 3.5rem;
+  background: rgba(246, 239, 226, 0.94);
+  padding: 1rem 1.2rem;
+  border-radius: 1.2rem;
+}
+.status.on-video {
+  bottom: 1rem;
+  margin: 0;
+}
+.spoken-now {
+  background: #ffe27a;
+  color: #8a4b00;
+  border-radius: 0.4rem;
+  padding: 0 0.12em;
+  box-shadow: 0 0 0 4px #ffe27a;
+}
 .status { font-size: 1.4rem; opacity: 0.8; }
+.picture-overlay { position: fixed; inset: 0; background: #1c1915; z-index: 12; display: grid; place-items: center; }
+.picture-overlay img, .board-picture { max-width: 100%; max-height: 100%; object-fit: contain; }
+.board-picture { max-width: min(90vw, 40rem); max-height: 50vh; }
 .video-overlay { position: fixed; inset: 0; background: black; z-index: 10; }
+.video-overlay.is-hidden { visibility: hidden; }
 .video-overlay iframe { width: 100%; height: 100%; border: 0; pointer-events: none; }
 .video-cover { position: absolute; inset: 0; z-index: 11; }
 .video-close {

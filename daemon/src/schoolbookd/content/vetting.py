@@ -25,6 +25,73 @@ class VideoCandidate:
     tags: list[str] = field(default_factory=list)
 
 
+_BABY_MARKERS = (
+    "cocomelon",
+    "baby shark",
+    "nursery rhyme",
+    "nursery rhymes",
+    "little baby bum",
+    "super simple songs",
+    "ms. rachel",
+    "ms rachel",
+    "pinkfong",
+    "surprise egg",
+    "learn colors",
+    "learn colours",
+    "abc song",
+    "phonics song",
+    "baby songs",
+    "kids songs",
+    "for toddlers",
+    "for babies",
+    "peppa pig",
+    "blippi",
+)
+
+_STRETCH_BOOST = (
+    "documentary",
+    "explainer",
+    "explained",
+    "paleontology",
+    "science",
+    "how ",
+    "why ",
+    "pbs",
+    "national geographic",
+    "khan",
+    "crash course",
+    "ted-ed",
+    "eons",
+    "scishow",
+    "minuteearth",
+    "museum",
+)
+
+
+def educational_search_query(query: str) -> str:
+    topic = " ".join(query.split())
+    if not topic:
+        return topic
+    words = topic.split()
+    lowered = topic.lower()
+    if "documentary" in lowered or "explainer" in lowered:
+        return " ".join(words[:8])
+    return f"{' '.join(words[:6])} documentary"
+
+
+def is_baby_content(video: VideoCandidate) -> bool:
+    text = f"{video.title} {video.channel_title} {video.description}".lower()
+    return any(marker in text for marker in _BABY_MARKERS)
+
+
+def rank_for_stretch(videos: list[VideoCandidate]) -> list[VideoCandidate]:
+    def score(video: VideoCandidate) -> int:
+        text = f"{video.title} {video.channel_title} {video.description}".lower()
+        return sum(1 for marker in _STRETCH_BOOST if marker in text)
+
+    return sorted(videos, key=score, reverse=True)
+
+
 @dataclass
 class HardFilterResult:
     ok: bool
@@ -49,6 +116,8 @@ def hard_filter(
         return HardFilterResult(False, "live stream")
     if video.short:
         return HardFilterResult(False, "short")
+    if is_baby_content(video):
+        return HardFilterResult(False, "baby entertainment")
     low, high = duration_minutes
     if video.duration_s < low * 60 or video.duration_s > high * 60:
         return HardFilterResult(False, "duration outside the window")

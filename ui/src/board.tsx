@@ -43,15 +43,18 @@ function BoardItem({ element }: { element: BoardElement }) {
     );
   }
   if (element.type === "image") {
-    return <p className="image">Picture: {element.image_id}</p>;
+    return <img className="board-picture" src={`/pictures/${element.image_id}`} alt={element.image_id} />;
   }
-  return (
-    <div className="shapes">
-      {element.items.map((item) => (
-        <span key={item.shape} className={item.shape} style={{ color: item.color }}>
-          {item.shape}
-        </span>
-      ))}
-    </div>
-  );
+  if (element.type === "shapes") {
+    return (
+      <div className="shapes">
+        {(element.items ?? []).map((item) => (
+          <span key={item.shape} className={item.shape} style={{ color: item.color }}>
+            {item.shape}
+          </span>
+        ))}
+      </div>
+    );
+  }
+  return null;
 }

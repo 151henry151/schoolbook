@@ -55,6 +55,13 @@ def test_show_board_rejects_urls_and_unknown_images() -> None:
     assert ok.allowed
 
 
+def test_show_picture_needs_a_short_topic() -> None:
+    policy = ToolPolicy()
+    assert not policy.check("show_picture", {"topic": ""}, _ctx()).allowed
+    assert not policy.check("show_picture", {"topic": "x" * 81}, _ctx()).allowed
+    assert policy.check("show_picture", {"topic": "dinosaur"}, _ctx()).allowed
+
+
 def test_ask_choice_bounds() -> None:
     policy = ToolPolicy()
     too_many = [{"id": str(i), "label": "Yes"} for i in range(5)]

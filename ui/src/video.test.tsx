@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // SPDX-FileCopyrightText: 2026 Schoolbook contributors
 
-import { fireEvent, render, screen } from "@testing-library/react";
+import { act, fireEvent, render, screen } from "@testing-library/react";
 import { playerCommand } from "./capture";
 import { VideoOverlay } from "./video";
 
@@ -20,20 +20,62 @@ test("the overlay autoplays without written play pause or done labels", () => {
 
 test("a tap pauses then resumes and the X closes the video", () => {
   const closed = vi.fn();
+  const paused = vi.fn();
   const target = { postMessage: vi.fn() };
-  render(<VideoOverlay videoId="abcdefghijk" onClose={closed} player={target} />);
+  render(
+    <VideoOverlay videoId="abcdefghijk" onClose={closed} onPausedChange={paused} player={target} />,
+  );
   fireEvent.click(screen.getByLabelText("pause or play"));
   expect(target.postMessage).toHaveBeenCalledWith(
     JSON.stringify({ event: "command", func: "pauseVideo", args: [] }),
     "https://www.youtube-nocookie.com",
   );
+  expect(paused).toHaveBeenCalledWith(true);
   fireEvent.click(screen.getByLabelText("pause or play"));
   expect(target.postMessage).toHaveBeenLastCalledWith(
     JSON.stringify({ event: "command", func: "playVideo", args: [] }),
     "https://www.youtube-nocookie.com",
   );
+  expect(paused).toHaveBeenLastCalledWith(false);
   fireEvent.click(screen.getByRole("button", { name: "close video" }));
   expect(closed).toHaveBeenCalledOnce();
+});
+
+test("a paused prop tells the player to pause or play", () => {
+  const target = { postMessage: vi.fn() };
+  const view = render(
+    <VideoOverlay videoId="abcdefghijk" paused onClose={() => {}} player={target} />,
+  );
+  expect(target.postMessage).toHaveBeenCalledWith(
+    JSON.stringify({ event: "command", func: "pauseVideo", args: [] }),
+    "https://www.youtube-nocookie.com",
+  );
+  view.rerender(
+    <VideoOverlay videoId="abcdefghijk" paused={false} onClose={() => {}} player={target} />,
+  );
+  expect(target.postMessage).toHaveBeenLastCalledWith(
+    JSON.stringify({ event: "command", func: "playVideo", args: [] }),
+    "https://www.youtube-nocookie.com",
+  );
+});
+
+test("a playing video hides the cursor until the mouse moves", () => {
+  vi.useFakeTimers();
+  render(<VideoOverlay videoId="abcdefghijk" onClose={() => {}} />);
+  const overlay = screen.getByLabelText("video");
+  expect(overlay.className).toContain("cursor-idle");
+  fireEvent.mouseMove(overlay);
+  expect(overlay.className).not.toContain("cursor-idle");
+  act(() => {
+    vi.advanceTimersByTime(2500);
+  });
+  expect(overlay.className).toContain("cursor-idle");
+  vi.useRealTimers();
+});
+
+test("a paused video keeps the cursor visible", () => {
+  render(<VideoOverlay videoId="abcdefghijk" paused onClose={() => {}} />);
+  expect(screen.getByLabelText("video").className).not.toContain("cursor-idle");
 });
 
 test("playerCommand posts a YouTube iframe command", () => {

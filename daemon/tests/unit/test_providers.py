@@ -53,6 +53,7 @@ def test_youtube_search_uses_safe_search() -> None:
     assert videos[0].title == "Volcanoes"
     assert seen[0]["safeSearch"] == "strict"
     assert seen[0]["videoEmbeddable"] == "true"
+    assert seen[0]["videoDuration"] == "medium"
 
 
 def test_anthropic_marks_only_cacheable_blocks() -> None:

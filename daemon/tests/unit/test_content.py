@@ -11,6 +11,8 @@ from schoolbookd.content.vetting import (
     MetadataReviewer,
     Review,
     VideoCandidate,
+    educational_search_query,
+    rank_for_stretch,
     update_reputation,
     vet_video,
     visible_to_tutor,
@@ -33,6 +35,45 @@ def _video(**overrides: object) -> VideoCandidate:
     }
     data.update(overrides)
     return VideoCandidate(**data)  # type: ignore[arg-type]
+
+
+def test_educational_search_query_aims_at_older_kids() -> None:
+    query = educational_search_query("dinosaur")
+    lowered = query.lower()
+    assert "dinosaur" in lowered
+    assert "documentary" in lowered or "explainer" in lowered
+    assert len(query) < 80
+    long_query = "dinosaur facts for kids educational video explanation of fossils and extinction"
+    assert len(educational_search_query(long_query)) < 80
+    assert educational_search_query("volcano documentary ages 10-12").lower().count("documentary") == 1
+
+
+def test_visible_to_tutor_drops_baby_entertainment() -> None:
+    videos = [
+        _video(video_id="cocomelon11", title="Cocomelon Dinosaur Song", channel_title="Cocomelon"),
+        _video(
+            video_id="abcdefghijk",
+            title="How dinosaurs lived",
+            channel_title="PBS Eons",
+            description="A paleontology explainer for older kids.",
+        ),
+    ]
+    visible = visible_to_tutor(videos, blocked_channels=set(), rejected_ids=set())
+    assert [video.video_id for video in visible] == ["abcdefghijk"]
+
+
+def test_rank_for_stretch_puts_explainers_first() -> None:
+    ranked = rank_for_stretch(
+        [
+            _video(video_id="songsong111", title="Dinosaur kids song", channel_title="Kids TV"),
+            _video(
+                video_id="abcdefghijk",
+                title="How dinosaurs lived: a science documentary",
+                channel_title="PBS Eons",
+            ),
+        ]
+    )
+    assert ranked[0].video_id == "abcdefghijk"
 
 
 def test_search_hides_shorts_live_blocked_and_rejected() -> None:

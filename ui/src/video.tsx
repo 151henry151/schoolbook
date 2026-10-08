@@ -3,18 +3,26 @@
 
 import { useEffect, useRef, useState } from "react";
 import { embedUrl, playerCommand, type PlayerTarget } from "./capture";
+import { hideVideoCursor, VIDEO_CURSOR_IDLE_MS } from "./cursor";
 
 export function VideoOverlay({
   videoId,
+  paused = false,
+  hidden = false,
   onClose,
+  onPausedChange,
   player,
 }: {
   videoId: string;
+  paused?: boolean;
+  hidden?: boolean;
   onClose: () => void;
+  onPausedChange?: (paused: boolean) => void;
   player?: PlayerTarget;
 }) {
   const frame = useRef<HTMLIFrameElement>(null);
-  const [paused, setPaused] = useState(false);
+  const [localPaused, setLocalPaused] = useState(paused);
+  const [idle, setIdle] = useState(!paused);
 
   useEffect(() => {
     const node = frame.current;
@@ -26,19 +34,47 @@ export function VideoOverlay({
     return () => node.removeEventListener("load", ready);
   }, [videoId]);
 
+  useEffect(() => {
+    setLocalPaused(paused);
+    setIdle(!paused);
+    const target = player ?? frame.current?.contentWindow ?? undefined;
+    if (!target) return;
+    playerCommand(target, paused ? "pauseVideo" : "playVideo");
+  }, [paused, player, videoId]);
+
+  useEffect(() => {
+    if (paused || idle) return;
+    const timer = window.setTimeout(() => setIdle(true), VIDEO_CURSOR_IDLE_MS);
+    return () => window.clearTimeout(timer);
+  }, [paused, idle]);
+
   function toggle() {
     const target = player ?? frame.current?.contentWindow ?? undefined;
-    if (paused) {
+    if (localPaused) {
       playerCommand(target, "playVideo");
-      setPaused(false);
+      setLocalPaused(false);
+      onPausedChange?.(false);
     } else {
       playerCommand(target, "pauseVideo");
-      setPaused(true);
+      setLocalPaused(true);
+      onPausedChange?.(true);
     }
   }
 
   return (
-    <section className="video-overlay" aria-label="video">
+    <section
+      className={[
+        "video-overlay",
+        hidden ? "is-hidden" : "",
+        hideVideoCursor(paused, idle) ? "cursor-idle" : "",
+      ]
+        .filter(Boolean)
+        .join(" ")}
+      aria-label="video"
+      onMouseMove={() => {
+        if (!paused) setIdle(false);
+      }}
+    >
       <iframe ref={frame} title="video" src={embedUrl(videoId)} allow="autoplay; fullscreen" />
       <div className="video-cover" aria-label="pause or play" onClick={toggle} />
       <button

@@ -43,6 +43,7 @@ _KNOWN = {
     "play_video",
     "vet_video",
     "video_control",
+    "show_picture",
     "list_apps",
     "launch_app",
     "get_skill_status",
@@ -118,6 +119,12 @@ class ToolPolicy:
         video_id = args.get("video_id")
         if not isinstance(video_id, str) or not video_id.strip():
             return Decision(False, "video_id is required")
+        return Decision(True, "ok")
+
+    def _check_show_picture(self, args: dict[str, object], ctx: PolicyContext) -> Decision:
+        topic = args.get("topic")
+        if not isinstance(topic, str) or not topic.strip() or len(topic) > 80:
+            return Decision(False, "picture topic must be a short phrase")
         return Decision(True, "ok")
 
     def _check_video_control(self, args: dict[str, object], ctx: PolicyContext) -> Decision:

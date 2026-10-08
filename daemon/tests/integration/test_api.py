@@ -165,6 +165,23 @@ def test_parent_end_session_requests_kiosk_exit(tmp_path: Path) -> None:
     assert (tmp_path / "kiosk.end").read_text(encoding="utf-8").strip() == "end"
 
 
+def test_child_can_load_a_saved_picture(tmp_path: Path) -> None:
+    from schoolbookd.content.pictures import TINY_PNG
+
+    host = _host(tmp_path)
+    images = tmp_path / "images"
+    images.mkdir()
+    path = images / "dinosaur.png"
+    path.write_bytes(TINY_PNG)
+    host.runtime.images_dir = images
+    host.runtime.store.add_image("dinosaur", str(path), "dinosaur", "generated", "generated")
+    child = TestClient(child_app(host))
+    assert child.get("/pictures/nope").status_code == 404
+    ok = child.get("/pictures/dinosaur")
+    assert ok.status_code == 200
+    assert ok.content == TINY_PNG
+
+
 def test_child_unlock_end_requests_kiosk_exit(tmp_path: Path) -> None:
     host = _host(tmp_path)
     host.data_dir = tmp_path

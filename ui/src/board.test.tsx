@@ -16,3 +16,22 @@ test("renders big text and a capped row of dots", () => {
   expect(screen.getByText("shark")).toBeTruthy();
   expect(screen.getByText("●●●")).toBeTruthy();
 });
+
+test("a library picture is an image, not the word Picture", () => {
+  render(<Board elements={[{ type: "image", image_id: "dinosaur" }]} />);
+  const image = screen.getByRole("img", { name: "dinosaur" });
+  expect(image.getAttribute("src")).toBe("/pictures/dinosaur");
+  expect(screen.queryByText(/Picture:/)).toBeNull();
+});
+
+test("a broken board element does not crash the page", () => {
+  render(
+    <Board
+      elements={[
+        { type: "shapes", items: undefined as unknown as [] },
+        { type: "big_text", text: "still here" },
+      ]}
+    />,
+  );
+  expect(screen.getByText("still here")).toBeTruthy();
+});

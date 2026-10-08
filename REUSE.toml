@@ -36,3 +36,9 @@ path = [
 precedence = "aggregate"
 SPDX-FileCopyrightText = "2026 Schoolbook contributors"
 SPDX-License-Identifier = "GPL-3.0-or-later"
+
+[[annotations]]
+path = ["ui/src/fonts/**"]
+precedence = "aggregate"
+SPDX-FileCopyrightText = "Milena Brandão and Ben Nathan"
+SPDX-License-Identifier = "OFL-1.1"

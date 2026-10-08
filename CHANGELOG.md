@@ -36,6 +36,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Speak about videos in everyday words and do not call them safe or vetted
 - Start videos automatically and hide the written play, pause, and done buttons
 - Mute the tutor microphone while a video plays, tap the picture to pause or resume, and close it with a red X
+- Prefer stretch-level educational videos for ages 10-12 and drop baby-entertainment search hits
+- Turn a child's video request into a parent briefing so the tutor picks history or science, not baby TV
+- Finish the tutor's spoken reply before a video starts
+- Keep the child's words on screen above the tutor reply, with playful type and speaker icons
+- Show the child's words as they are spoken and highlight the tutor word that is playing
+- Listen again when a video is paused so the child can ask for a different one or change the subject
+- Generate an educational picture with OpenAI and show it when the child asks to see something
+- Keep YouTube search queries short, retry empty caches, and fall back to an approved video on the same topic
+- Keep the microphone closed until tutor audio finishes so the tutor does not answer its own voice
+- Ask the child to confirm when a transcript looks garbled instead of guessing
+- Answer a question over a paused video, keep the player, and resume or stop after they choose
+- Use a bigger cartoon pointer with a white center and a blue outline, and hide it during video until the mouse moves
 
 ## [0.9.0] - 2026-10-07
 

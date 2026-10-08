@@ -17,14 +17,52 @@ export class PlaybackQueue {
   private active: string | null = null;
   private ignored = new Set<string>();
   private tail: Promise<void> = Promise.resolve();
+  private turnId: string | null = null;
+  private queuedMs = 0;
+  private playedMs = 0;
+  private progress: ((elapsedMs: number, durationMs: number) => void) | null = null;
+  private pending = 0;
 
   constructor(private readonly player: AudioPlayer) {}
 
+  isIdle(): boolean {
+    return this.pending === 0;
+  }
+
+  setProgress(handler: ((elapsedMs: number, durationMs: number) => void) | null): void {
+    this.progress = handler;
+  }
+
   async enqueue(turnId: string, pcm: Int16Array, sampleRate: number): Promise<void> {
+    if (this.turnId !== turnId) {
+      this.turnId = turnId;
+      this.queuedMs = 0;
+      this.playedMs = 0;
+    }
+    const chunkMs = (pcm.length / Math.max(sampleRate, 1)) * 1000;
+    this.queuedMs += chunkMs;
+    this.pending += 1;
     this.tail = this.tail.then(async () => {
-      if (this.ignored.has(turnId)) return;
-      this.active = turnId;
-      await this.player.play(turnId, pcm, sampleRate);
+      try {
+        if (this.ignored.has(turnId)) return;
+        this.active = turnId;
+        const begun = Date.now();
+        const tick = globalThis.setInterval(() => {
+          const elapsed = this.playedMs + Math.min(Date.now() - begun, chunkMs);
+          this.progress?.(elapsed, this.queuedMs);
+        }, 40);
+        try {
+          this.progress?.(this.playedMs, this.queuedMs);
+          await this.player.play(turnId, pcm, sampleRate);
+        } finally {
+          globalThis.clearInterval(tick);
+          this.playedMs += chunkMs;
+          this.progress?.(this.playedMs, this.queuedMs);
+        }
+      } finally {
+        this.pending -= 1;
+        this.active = null;
+      }
     });
     return this.tail;
   }
@@ -32,7 +70,13 @@ export class PlaybackQueue {
   interrupt(): void {
     if (this.active) this.ignored.add(this.active);
     this.active = null;
+    this.queuedMs = 0;
+    this.playedMs = 0;
     this.player.stop();
+  }
+
+  whenIdle(): Promise<void> {
+    return this.tail;
   }
 }
 

@@ -16,6 +16,7 @@ from schoolbookd.api import Host
 from schoolbookd.config import SchoolbookConfig, Secrets
 from schoolbookd.content.apps import load_manifests
 from schoolbookd.content.catalog import CharterReviewer, SearchClient, VideoCatalog
+from schoolbookd.content.pictures import PictureMaker
 from schoolbookd.content.skills import load_skill_rows
 from schoolbookd.db.engine import backup_database, make_engine, migrate, session_factory
 from schoolbookd.db.models import Learner
@@ -41,6 +42,7 @@ def build_host(config: SchoolbookConfig, secrets: Secrets) -> Host:
     profile = load_age_profile(config.profiles_dir / "age-6.yaml")
     token = secrets_mod.token_urlsafe(32)
     config.data_dir.mkdir(parents=True, exist_ok=True)
+    config.images_dir.mkdir(parents=True, exist_ok=True)
     config.token_file.write_text(token + "\n", encoding="utf-8")
     with contextlib.suppress(OSError):
         config.token_file.chmod(0o640)
@@ -70,6 +72,8 @@ def build_host(config: SchoolbookConfig, secrets: Secrets) -> Host:
             config.notifications.email_to,
         ),
         min_video_pause_s=float(profile.watch_along_pause_min_seconds),
+        pictures=_pictures(secrets),
+        images_dir=config.images_dir,
     )
     return Host(
         runtime=runtime,
@@ -142,6 +146,14 @@ def _duration(window: list[int]) -> tuple[int, int]:
     if len(window) != 2:
         return (1, 30)
     return (window[0], window[1])
+
+
+def _pictures(secrets: Secrets) -> PictureMaker | None:
+    if not secrets.openai_api_key:
+        return None
+    from schoolbookd.providers.openai_images import OpenAIImages
+
+    return OpenAIImages(secrets.openai_api_key)
 
 
 def _youtube(secrets: Secrets) -> SearchClient | None:

@@ -8,11 +8,13 @@ from __future__ import annotations
 import json
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
+from pathlib import Path
 
 from schoolbookd.content.apps import AppManifest, build_argv
 from schoolbookd.content.catalog import VideoCatalog
+from schoolbookd.content.pictures import PictureMaker, picture_id, picture_prompt
+from schoolbookd.db.models import ImageRow, Video
 from schoolbookd.content.playback import pause_allowed, split_summary
-from schoolbookd.db.models import Video
 from schoolbookd.db.store import Store
 from schoolbookd.learner.memory import assemble_profile
 from schoolbookd.notify import Notifier
@@ -52,6 +54,23 @@ class Runtime:
     classifier: KeywordClassifier | None = None
     notifier: Notifier | None = None
     min_video_pause_s: float = 120
+    pictures: PictureMaker | None = None
+    images_dir: Path | None = None
+
+    def image_path(self, image_id: str) -> Path | None:
+        if not image_id or "/" in image_id or ".." in image_id:
+            return None
+        if self.images_dir is not None:
+            for suffix in (".png", ".webp", ".jpg", ".jpeg", ".svg"):
+                path = self.images_dir / f"{image_id}{suffix}"
+                if path.is_file():
+                    return path
+        with self.store.session() as db:
+            row = db.get(ImageRow, image_id)
+        if row is None:
+            return None
+        path = Path(row.path)
+        return path if path.is_file() else None
 
     def policy_context(self, live: LiveState) -> PolicyContext:
         disabled = self.store.get_setting("disabled_apps", [])
@@ -200,6 +219,18 @@ class Runtime:
         if name == "show_board":
             live.screen = "board"
             return {"shown": True}
+        if name == "show_picture":
+            if self.pictures is None or self.images_dir is None:
+                return {"error": "pictures are not ready"}
+            topic = str(args["topic"]).strip()
+            image_id = picture_id(topic)
+            self.images_dir.mkdir(parents=True, exist_ok=True)
+            path = self.images_dir / f"{image_id}.png"
+            if not path.is_file():
+                path.write_bytes(self.pictures.generate(picture_prompt(topic)))
+            self.store.add_image(image_id, str(path), topic, "generated", "generated")
+            live.screen = "board"
+            return {"shown": True, "image_id": image_id}
         if name == "ask_choice":
             return {"waiting": True}
         if name == "record_observation":

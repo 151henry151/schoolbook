@@ -2,3 +2,5 @@ Schoolbook code is GPL-3.0-or-later.
 
 images/star.svg is an original drawing by Schoolbook contributors, released CC0-1.0.
 Bundled images keep their own licenses in the images table and in this file.
+
+ui/src/fonts/Fredoka-Variable.ttf is Fredoka by Milena Brandão and Ben Nathan, SIL Open Font License 1.1. See ui/src/fonts/OFL.txt.

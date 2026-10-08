@@ -14,9 +14,10 @@ class ScriptSearch:
     def __init__(self, videos: list[VideoCandidate]) -> None:
         self.videos = videos
         self.calls = 0
+        self.queries: list[str] = []
 
     def search(self, query: str) -> list[VideoCandidate]:
-        del query
+        self.queries.append(query)
         self.calls += 1
         return self.videos
 
@@ -49,6 +50,26 @@ def _video(**overrides: object) -> VideoCandidate:
     }
     fields.update(overrides)
     return VideoCandidate(**fields)  # type: ignore[arg-type]
+
+
+def test_search_rewrites_toward_stretch_and_drops_baby_videos(tmp_path: Path) -> None:
+    client = ScriptSearch(
+        [
+            _video(video_id="cocomelon11", title="Cocomelon dinosaur song", channel_title="Cocomelon"),
+            _video(
+                video_id="abcdefghijk",
+                title="How dinosaurs lived",
+                channel_title="PBS Eons",
+                description="Paleontology documentary.",
+            ),
+        ]
+    )
+    catalog = VideoCatalog(_store(tmp_path), client, CharterReviewer(), CharterReviewer())
+    results = catalog.search("dinosaur")
+    assert client.queries
+    assert len(client.queries[0]) < 80
+    assert "dinosaur" in client.queries[0].lower()
+    assert [item["video_id"] for item in results] == ["abcdefghijk"]
 
 
 def test_search_drops_shorts_and_hides_urls(tmp_path: Path) -> None:
@@ -95,6 +116,39 @@ def test_red_team_queries_approve_nothing(tmp_path: Path) -> None:
             if catalog.vet(video_id)["verdict"] == "approved":
                 approved.append(video_id)
     assert approved == []
+
+
+def test_empty_youtube_hits_are_not_cached(tmp_path: Path) -> None:
+    client = ScriptSearch([])
+    catalog = VideoCatalog(_store(tmp_path), client, CharterReviewer(), CharterReviewer())
+    assert catalog.search("dinosaur") == []
+    assert catalog.search("dinosaur") == []
+    assert client.calls == 2
+
+
+def test_empty_search_falls_back_to_an_approved_video(tmp_path: Path) -> None:
+    store = _store(tmp_path)
+    from schoolbookd.db.models import Video
+    from datetime import UTC, datetime
+
+    store.save_video(
+        Video(
+            id="dktnOPfE7Dc",
+            source="youtube",
+            source_ref="dktnOPfE7Dc",
+            title="Dinosaurs for Kids | Learn about Dinosaur History",
+            channel_id="chan",
+            channel_title="Science",
+            duration_s=554,
+            summary="Fossils and extinction.",
+            verdict="approved",
+            vetted_at=datetime.now(UTC),
+            language="en",
+        )
+    )
+    catalog = VideoCatalog(store, ScriptSearch([]), CharterReviewer(), CharterReviewer())
+    results = catalog.search("dinosaur")
+    assert results[0]["video_id"] == "dktnOPfE7Dc"
 
 
 def test_embed_uses_the_nocookie_domain() -> None:

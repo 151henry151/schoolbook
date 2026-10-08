@@ -10,6 +10,8 @@ import { PlaybackQueue, decodePcm16, webAudioPlayer } from "./playback";
 import { createVad, encodePcm16 } from "./pcm";
 import { PROTOCOL_MAJOR, type BoardElement } from "./protocol";
 import { ParentUnlock } from "./unlock";
+import { TalkLines, nextTalkPair, spokenWordIndex, type TalkPair } from "./talkLines";
+import { PictureOverlay } from "./picture";
 import { VideoOverlay } from "./video";
 
 type Phase = "home" | "talk";
@@ -19,10 +21,16 @@ type Choice = { id: string; label: string };
 export function App() {
   const [phase, setPhase] = useState<Phase>("home");
   const [name, setName] = useState("friend");
-  const [transcript, setTranscript] = useState("");
+  const [talk, setTalk] = useState<TalkPair>({ child: "", tutor: "" });
+  const [spokenIndex, setSpokenIndex] = useState(-1);
+  const talkRef = useRef<TalkPair>({ child: "", tutor: "" });
+  const pendingVideo = useRef("");
+  const pendingPicture = useRef("");
   const [elements, setElements] = useState<BoardElement[]>([]);
   const [choices, setChoices] = useState<Choice[]>([]);
   const [videoId, setVideoId] = useState("");
+  const [videoPaused, setVideoPaused] = useState(false);
+  const [pictureId, setPictureId] = useState("");
   const [offline, setOffline] = useState(false);
   const [unlock, setUnlock] = useState(false);
   const [token, setToken] = useState("");
@@ -50,6 +58,17 @@ export function App() {
   }, [voice]);
 
   useEffect(() => {
+    talkRef.current = talk;
+  }, [talk]);
+
+  useEffect(() => {
+    queue.current.setProgress((elapsed, duration) => {
+      setSpokenIndex(spokenWordIndex(talkRef.current.tutor, elapsed, duration));
+    });
+    return () => queue.current.setProgress(null);
+  }, []);
+
+  useEffect(() => {
     let active = true;
     let opened: WebSocket | null = null;
     void (async () => {
@@ -70,6 +89,7 @@ export function App() {
           elements?: BoardElement[];
           video_id?: string;
           action?: string;
+          image_id?: string;
           name?: string;
           options?: Choice[];
           pcm_b64?: string;
@@ -82,7 +102,7 @@ export function App() {
           if (message.voice) setVoice(message.voice);
         }
         if (message.type === "transcript" && message.text) {
-          setTranscript(message.text);
+          setTalk((current) => nextTalkPair(current, message.role ?? "", message.text ?? ""));
           if (message.role === "tutor") {
             speaking.current = true;
             setStatus("Talking");
@@ -101,8 +121,36 @@ export function App() {
         if (message.type === "choices" && message.options && voiceRef.current !== "realtime") {
           setChoices(message.options);
         }
-        if (message.type === "video" && message.action === "play" && message.video_id) setVideoId(message.video_id);
-        if (message.type === "video" && (message.action === "stop" || message.action === "destroy")) setVideoId("");
+        if (message.type === "video" && message.action === "play" && message.video_id) {
+          pendingVideo.current = message.video_id;
+          void queue.current.whenIdle().then(() => {
+            const ready = pendingVideo.current;
+            if (!ready) return;
+            pendingVideo.current = "";
+            setPictureId("");
+            setVideoPaused(false);
+            setVideoId(ready);
+          });
+        }
+        if (message.type === "video" && (message.action === "stop" || message.action === "destroy")) {
+          pendingVideo.current = "";
+          setPictureId("");
+          setVideoPaused(false);
+          setVideoId("");
+        }
+        if (message.type === "video" && message.action === "resume") {
+          setPictureId("");
+          setVideoPaused(false);
+        }
+        if (message.type === "picture" && message.image_id) {
+          pendingPicture.current = message.image_id;
+          void queue.current.whenIdle().then(() => {
+            const ready = pendingPicture.current;
+            if (!ready) return;
+            pendingPicture.current = "";
+            setPictureId(ready);
+          });
+        }
         if (message.type === "state" && message.name === "offline") setOffline(true);
         if (message.type === "state" && message.name === "home") setOffline(false);
         if (message.type === "state" && message.name === "parent_unlock") setUnlock(true);
@@ -112,9 +160,17 @@ export function App() {
           setStatus("Talking");
         }
         if (message.type === "state" && message.name === "listening") {
-          speaking.current = false;
-          hands.current = armIfWaiting(hands.current);
-          setStatus(message.detail === "hearing" ? "I hear you" : "Listening");
+          const finish = () => {
+            speaking.current = false;
+            hands.current = armIfWaiting(hands.current);
+            if (message.detail === "hearing") setSpokenIndex(-1);
+            setStatus(message.detail === "hearing" ? "I hear you" : "Listening");
+          };
+          if (message.detail === "hearing") {
+            finish();
+            return;
+          }
+          void queue.current.whenIdle().then(finish);
         }
       };
       ws.onopen = () => {
@@ -129,13 +185,13 @@ export function App() {
   }, []);
 
   useEffect(() => {
-    if (phase !== "talk" || videoId) return;
+    if (phase !== "talk" || (videoId && !videoPaused)) return;
     let stop: (() => void) | undefined;
     void startMic((pcm, dtMs) => {
       const ws = socketRef.current;
       if (!ws || ws.readyState !== WebSocket.OPEN) return;
       if (voice === "realtime") {
-        if (speaking.current) return;
+        if (speaking.current || !queue.current.isIdle()) return;
         ws.send(
           JSON.stringify({
             type: "audio_frame",
@@ -191,7 +247,7 @@ export function App() {
         setStatus("I cannot hear the microphone");
       });
     return () => stop?.();
-  }, [phase, voice, videoId]);
+  }, [phase, voice, videoId, videoPaused]);
 
   function send(message: object) {
     socket?.send(JSON.stringify(message));
@@ -267,8 +323,14 @@ export function App() {
           ))}
         </div>
       ) : null}
-      <p className="transcript">{transcript}</p>
-      <p className="status" role="status">
+      <TalkLines
+        name={name}
+        child={talk.child}
+        tutor={talk.tutor}
+        spokenIndex={spokenIndex}
+        overVideo={Boolean((videoId && videoPaused) || pictureId)}
+      />
+      <p className={(videoId && videoPaused) || pictureId ? "status on-video" : "status"} role="status">
         {status}
       </p>
       {offline ? (
@@ -295,12 +357,28 @@ export function App() {
           <button type="submit">Send</button>
         </form>
       ) : null}
+      {pictureId ? (
+        <PictureOverlay
+          imageId={pictureId}
+          onClose={() => {
+            setPictureId("");
+          }}
+        />
+      ) : null}
       {videoId ? (
         <VideoOverlay
           videoId={videoId}
+          paused={videoPaused}
+          hidden={Boolean(pictureId)}
           onClose={() => {
+            setPictureId("");
+            setVideoPaused(false);
             setVideoId("");
             send({ type: "video_ui", action: "done" });
+          }}
+          onPausedChange={(paused) => {
+            setVideoPaused(paused);
+            send({ type: "video_ui", action: paused ? "pause" : "resume" });
           }}
         />
       ) : null}

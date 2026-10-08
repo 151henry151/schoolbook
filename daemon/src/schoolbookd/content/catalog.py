@@ -6,6 +6,7 @@
 from __future__ import annotations
 
 import json
+import re
 from dataclasses import asdict
 from datetime import UTC, datetime
 from typing import Protocol, cast
@@ -16,6 +17,8 @@ from schoolbookd.content.vetting import (
     MetadataReviewer,
     Review,
     VideoCandidate,
+    educational_search_query,
+    rank_for_stretch,
     update_reputation,
     vet_video,
     visible_to_tutor,
@@ -37,7 +40,7 @@ class CharterReviewer:
 
     def review(self, video: VideoCandidate) -> Review:
         text = f"{video.title} {video.description} {video.channel_title}".lower()
-        for word in ("surprise", "buy now", "violent", "clickbait"):
+        for word in ("surprise", "buy now", "violent", "clickbait", "cocomelon", "nursery rhyme"):
             if word in text:
                 return Review(False, word, 1)
         return Review(True, "fits the learner", 4)
@@ -71,6 +74,38 @@ def candidate_from(raw: object) -> VideoCandidate | None:
         return None
 
 
+_QUERY_STOP = {
+    "about",
+    "educational",
+    "explainer",
+    "documentary",
+    "kids",
+    "video",
+    "videos",
+    "show",
+    "some",
+    "facts",
+    "lesson",
+}
+
+
+def candidate_from_row(video: Video) -> VideoCandidate:
+    return VideoCandidate(
+        video_id=video.id,
+        title=video.title,
+        channel_id=video.channel_id,
+        channel_title=video.channel_title,
+        description=video.summary,
+        duration_s=video.duration_s,
+        embeddable=bool(video.embeddable),
+        age_restricted=bool(video.age_restricted),
+        live=bool(video.live),
+        short=bool(video.short),
+        language=video.language or "en",
+        made_for_kids=bool(video.made_for_kids),
+    )
+
+
 def public_candidate(video: VideoCandidate) -> dict[str, object]:
     return {
         "video_id": video.video_id,
@@ -102,19 +137,25 @@ class VideoCatalog:
         self.language = language
 
     def search(self, query: str) -> list[dict[str, object]]:
-        key = "yt-cache:" + query.strip().lower()
+        shaped = educational_search_query(query)
+        key = "yt-cache-v2:" + shaped.strip().lower()
         cached_ids = self.store.get_setting(key)
         candidates = self._load_cached(cached_ids)
         if candidates is None:
-            candidates = self.youtube.search(query) if self.youtube is not None else []
-            self._remember(key, candidates)
-        kept = visible_to_tutor(
-            candidates,
-            blocked_channels=self.store.blocked_channels(),
-            rejected_ids=self.store.rejected_ids(),
-            duration_minutes=self.duration_minutes,
-            language=self.language,
+            candidates = self.youtube.search(shaped) if self.youtube is not None else []
+            if candidates:
+                self._remember(key, candidates)
+        kept = rank_for_stretch(
+            visible_to_tutor(
+                candidates,
+                blocked_channels=self.store.blocked_channels(),
+                rejected_ids=self.store.rejected_ids(),
+                duration_minutes=self.duration_minutes,
+                language=self.language,
+            )
         )
+        if not kept:
+            kept = self._approved_matching(query)
         return [public_candidate(video) for video in kept]
 
     def vet(self, video_id: str) -> dict[str, object]:
@@ -176,8 +217,23 @@ class VideoCatalog:
         self.store.put_setting("yt-index", mapping, actor="system")
         self.store.put_setting(key, [candidate.video_id for candidate in candidates], actor="system")
 
+    def _approved_matching(self, query: str) -> list[VideoCandidate]:
+        words = [
+            word
+            for word in re.findall(r"[a-z0-9]+", query.lower())
+            if len(word) > 3 and word not in _QUERY_STOP
+        ]
+        if not words:
+            return []
+        matches: list[VideoCandidate] = []
+        for video in self.store.approved_videos():
+            text = f"{video.title} {video.summary}".lower()
+            if any(word in text for word in words):
+                matches.append(self._lookup(video.id) or candidate_from_row(video))
+        return rank_for_stretch(matches)
+
     def _load_cached(self, cached_ids: object) -> list[VideoCandidate] | None:
-        if not isinstance(cached_ids, list):
+        if not isinstance(cached_ids, list) or not cached_ids:
             return None
         loaded: list[VideoCandidate] = []
         for video_id in cached_ids:

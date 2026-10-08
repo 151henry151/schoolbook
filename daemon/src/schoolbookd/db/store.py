@@ -450,6 +450,10 @@ class Store:
             stmt = select(Video.id).where(Video.verdict == "approved")
             return set(db.scalars(stmt))
 
+    def approved_videos(self) -> list[Video]:
+        with self.session() as db:
+            return list(db.scalars(select(Video).where(Video.verdict == "approved")))
+
     def blocked_ids(self) -> set[str]:
         with self.session() as db:
             stmt = select(Video.id).where(Video.verdict == "blocked")

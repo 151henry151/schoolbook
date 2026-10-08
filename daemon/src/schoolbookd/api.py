@@ -18,7 +18,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 from fastapi import FastAPI, Request, WebSocket, WebSocketDisconnect
-from fastapi.responses import JSONResponse
+from fastapi.responses import FileResponse, JSONResponse
 from sqlalchemy import select
 from starlette.responses import Response as StarletteResponse
 
@@ -41,7 +41,13 @@ from schoolbookd.db.models import (
 )
 from schoolbookd.policy.unlock import UnlockState, attempt_unlock, hash_password
 from schoolbookd.providers.base import STTProvider
-from schoolbookd.providers.openai_realtime import REALTIME_TOOLS, RealtimeTalk, spoken_child_instructions
+from schoolbookd.providers.openai_realtime import (
+    REALTIME_TOOLS,
+    RealtimeMapper,
+    RealtimeTalk,
+    paused_video_note,
+    spoken_child_instructions,
+)
 from schoolbookd.runtime import LiveState, Runtime
 from schoolbookd.secrets_file import upsert_secrets
 from schoolbookd.tutor.loop import TurnOutcome
@@ -193,6 +199,7 @@ class Host:
             instructions=instructions,
             execute=execute,
             tools=list(REALTIME_TOOLS),
+            mapper=RealtimeMapper(child_name=name),
         )
 
     def note_transcript(self, role: str, text: str) -> None:
@@ -229,6 +236,13 @@ def child_app(host: Host) -> FastAPI:
     @app.get("/token")
     def token() -> dict[str, str]:
         return {"token": host.token, "protocol_major": str(MAJOR)}
+
+    @app.get("/pictures/{image_id}")
+    def picture(image_id: str) -> StarletteResponse:
+        path = host.runtime.image_path(image_id)
+        if path is None:
+            return JSONResponse({"error": "missing"}, status_code=404)
+        return FileResponse(path)
 
     @app.post("/dev/turn")
     def dev_turn(body: dict[str, str], request: Request) -> JSONResponse:
@@ -288,7 +302,7 @@ def child_app(host: Host) -> FastAPI:
             talk = host.make_realtime()
 
             async def emit(message: dict[str, object]) -> None:
-                if message.get("type") == "transcript":
+                if message.get("type") == "transcript" and not message.get("partial"):
                     host.note_transcript(str(message.get("role", "tutor")), str(message.get("text", "")))
                 await socket.send_json(message)
 
@@ -356,6 +370,8 @@ def child_app(host: Host) -> FastAPI:
                     if incoming.action == "done":
                         live.playing_video = None
                         live.screen = "home"
+                    if talk is not None and incoming.action == "pause":
+                        await talk.add_system_note(paused_video_note())
                     await socket.send_json(
                         {
                             "type": "video",

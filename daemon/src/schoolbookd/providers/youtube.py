@@ -23,6 +23,7 @@ class YouTubeClient:
                 "type": "video",
                 "safeSearch": "strict",
                 "videoEmbeddable": "true",
+                "videoDuration": "medium",
                 "q": query,
                 "key": self._api_key,
                 "maxResults": 8,
