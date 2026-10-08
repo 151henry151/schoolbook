@@ -62,6 +62,16 @@ def test_show_picture_needs_a_short_topic() -> None:
     assert policy.check("show_picture", {"topic": "dinosaur"}, _ctx()).allowed
 
 
+def test_show_picture_accepts_a_diagram_brief() -> None:
+    policy = ToolPolicy()
+    brief = (
+        "Draw a great white shark next to a stack of houses. "
+        "The stack should show how deep the shark can dive."
+    )
+    assert policy.check("show_picture", {"topic": "shark depth", "brief": brief}, _ctx()).allowed
+    assert not policy.check("show_picture", {"topic": "shark", "brief": "x" * 1201}, _ctx()).allowed
+
+
 def test_ask_choice_bounds() -> None:
     policy = ToolPolicy()
     too_many = [{"id": str(i), "label": "Yes"} for i in range(5)]

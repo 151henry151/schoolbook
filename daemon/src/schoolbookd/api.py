@@ -106,6 +106,8 @@ class Host:
     data_dir: Path | None = None
     voice: str = "pipeline"
     openai_api_key: str = ""
+    picture_emit: Callable[[dict[str, object]], Awaitable[None]] | None = None
+    picture_talk: RealtimeTalk | None = None
 
     def request_kiosk_end(self) -> None:
         if self.data_dir is None:
@@ -201,8 +203,14 @@ class Host:
             tutor_name=tutor_name,
         )
 
+        loop = asyncio.get_running_loop()
+
         def execute(tool: str, args: dict[str, object]) -> dict[str, object]:
-            return self.runtime.run_tool(self.ensure_live(), tool, args)
+            result = self.runtime.run_tool(self.ensure_live(), tool, args, defer_pictures=True)
+            if result.get("loading") and result.get("image_id"):
+                brief = str(result.get("brief") or result.get("topic") or "")
+                loop.create_task(self.complete_picture(brief, str(result["image_id"])))
+            return result
 
         return RealtimeTalk(
             api_key=self.openai_api_key,
@@ -213,6 +221,22 @@ class Host:
             voice=voice,
             tutor_name=tutor_name,
         )
+
+    async def complete_picture(self, topic: str, image_id: str) -> None:
+        try:
+            done = await asyncio.to_thread(self.runtime.finish_picture, self.ensure_live(), topic, image_id)
+        except Exception as exc:
+            print(f"schoolbook: picture failed ({exc})", file=sys.stderr)
+            emit = self.picture_emit
+            if emit is not None:
+                await emit({"type": "picture", "image_id": image_id, "loading": False, "error": True})
+            return
+        talk = self.picture_talk
+        if talk is not None:
+            await talk.picture_ready()
+        emit = self.picture_emit
+        if emit is not None and done.get("image_id"):
+            await emit({"type": "picture", "image_id": str(done["image_id"]), "loading": False})
 
     def note_transcript(self, role: str, text: str) -> None:
         if not text.strip():
@@ -318,6 +342,8 @@ def child_app(host: Host) -> FastAPI:
                     host.note_transcript(str(message.get("role", "tutor")), str(message.get("text", "")))
                 await socket.send_json(message)
 
+            host.picture_emit = emit
+            host.picture_talk = talk
             try:
                 await talk.start()
                 pump = asyncio.create_task(talk.pump(emit))
@@ -398,6 +424,8 @@ def child_app(host: Host) -> FastAPI:
                         }
                     )
         finally:
+            host.picture_talk = None
+            host.picture_emit = None
             if pump is not None:
                 pump.cancel()
             if talk is not None:

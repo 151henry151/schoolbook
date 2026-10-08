@@ -8,13 +8,19 @@ from schoolbookd.providers.openai_realtime import (
     REALTIME_TOOLS,
     RealtimeMapper,
     RealtimeTalk,
+    answer_first_nudge,
     child_speech_decision,
     clarify_speech_note,
     connect_headers,
     extract_child_speech,
     looks_like_child_speech,
+    looks_like_curious_question,
     looks_like_fantasy,
     paused_video_note,
+    picture_keep_talking,
+    picture_making_line,
+    picture_shown_line,
+    picture_wait_instructions,
     real_world_nudge,
     resample_pcm16,
     session_update,
@@ -37,6 +43,7 @@ def test_session_update_disables_barge_in_and_uses_server_vad() -> None:
     assert float(turn["threshold"]) >= 0.55
     assert session["tools"][0]["name"] == "show_board"
     assert session["audio"]["output"]["voice"] == "marin"
+    assert float(session["audio"]["output"]["speed"]) <= 0.9
     cedar = session_update(instructions="Be a computer helper.", tools=[], voice="cedar")
     assert cedar["session"]["audio"]["output"]["voice"] == "cedar"
 
@@ -91,19 +98,27 @@ def test_function_call_runs_the_schoolbook_tool() -> None:
     assert outbound[1]["type"] == "response.create"
 
 
-def test_child_transcript_deltas_stream_before_the_final() -> None:
+def test_child_transcript_waits_until_the_agent_heard_the_sentence() -> None:
     mapper = RealtimeMapper()
     first, outbound = mapper.handle(
-        {"type": "conversation.item.input_audio_transcription.delta", "delta": "Show"}
+        {"type": "conversation.item.input_audio_transcription.delta", "delta": "The deep"}
     )
     second, _ = mapper.handle(
-        {"type": "conversation.item.input_audio_transcription.delta", "delta": " me"}
+        {"type": "conversation.item.input_audio_transcription.delta", "delta": " of the"}
     )
-    assert first[0]["role"] == "child"
-    assert first[0]["text"] == "Show"
-    assert first[0]["partial"] is True
-    assert second[0]["text"] == "Show me"
+    assert first == []
+    assert second == []
     assert outbound == []
+    done, reply = mapper.handle(
+        {
+            "type": "conversation.item.input_audio_transcription.completed",
+            "transcript": "How deep can a great white shark go?",
+        }
+    )
+    assert done[0]["role"] == "child"
+    assert done[0]["text"] == "How deep can a great white shark go?"
+    assert done[0]["partial"] is False
+    assert reply[-1]["type"] == "response.create"
 
 
 def test_tutor_transcript_deltas_stream_while_speaking() -> None:
@@ -140,6 +155,8 @@ def test_video_watch_briefing_asks_for_history_or_science() -> None:
     assert "science" in lowered
     assert "youtube" in lowered
     assert video_watch_briefing("I like cookies") is None
+    assert video_watch_briefing("Can I learn about how deep a great white shark has to go?") is None
+    assert video_watch_briefing("How deep do sharks go?") is None
 
 
 def test_video_request_sends_an_educational_briefing_to_the_model() -> None:
@@ -183,6 +200,13 @@ def test_realtime_tools_do_not_offer_written_menus() -> None:
     assert "show_picture" in names
     assert "switch_voice" in names
     assert "set_tutor_name" in names
+    picture = next(tool for tool in REALTIME_TOOLS if tool.get("name") == "show_picture")
+    props = picture["parameters"]["properties"]
+    assert "brief" in props
+    assert "topic" in props
+    desc = str(picture.get("description", "")).lower()
+    assert "illustrat" in desc or "point" in desc
+    assert "claude" in desc or "choose" in desc or "judgment" in desc
 
 
 def test_spoken_instructions_tell_the_tutor_to_find_videos_itself() -> None:
@@ -194,8 +218,53 @@ def test_spoken_instructions_tell_the_tutor_to_find_videos_itself() -> None:
     assert "video id" in lowered or "video_id" in lowered
     assert "never ask" in lowered
     assert "show_picture" in text
+    assert "brief" in lowered
+    assert "claude" in lowered
+    assert "illustrat" in lowered or "point" in lowered or "judgment" in lowered
     assert "made-up" in lowered or "story" in lowered or "pretend" in lowered
     assert "real" in lowered
+    assert "answer" in lowered
+    assert "if a picture" in lowered or "only if" in lowered or "judgment" in lowered
+    assert "video" in lowered
+    assert "finish" in lowered or "this turn" in lowered or "lead-in" in lowered
+
+
+def test_a_curious_question_gets_an_answer_and_picture_not_a_video() -> None:
+    asked = "Can I learn about how deep a great white shark has to go?"
+    assert looks_like_curious_question(asked)
+    assert looks_like_curious_question("How deep do sharks go?")
+    assert looks_like_curious_question("Why is the sky blue?")
+    assert not looks_like_curious_question("Hello how are you doing?")
+    assert not looks_like_curious_question("Show me some dinosaur videos")
+    note = answer_first_nudge(asked, name="Arum")
+    assert note is not None
+    lowered = note.lower()
+    assert "arum" in lowered
+    assert "picture" in lowered
+    assert "if a picture" in lowered or "only if" in lowered or "judgment" in lowered
+    assert "video" in lowered
+    assert "talk" in lowered
+    assert "this turn" in lowered or "lead-in" in lowered or "do not stop" in lowered
+    assert answer_first_nudge("Show me some shark videos") is None
+    assert answer_first_nudge("Tell me about Elsa") is None
+    mapper = RealtimeMapper(child_name="Arum")
+    _ui, outbound = mapper.handle(
+        {
+            "type": "conversation.item.input_audio_transcription.completed",
+            "transcript": asked,
+        }
+    )
+    notes = [
+        str(item["item"]["content"][0]["text"])
+        for item in outbound
+        if item.get("type") == "conversation.item.create"
+    ]
+    assert any("picture" in note.lower() and ("if" in note.lower() or "only" in note.lower()) for note in notes)
+    assert any("video" in note.lower() for note in notes)
+    create = next(item for item in outbound if item.get("type") == "response.create")
+    create_text = str(create.get("response", {}).get("instructions", "")).lower()
+    assert "answer" in create_text
+    assert "lead-in" in create_text or "do not stop" in create_text or "this turn" in create_text
 
 
 def test_fantasy_talk_gets_a_gentle_nudge_toward_real_things() -> None:
@@ -463,11 +532,81 @@ def test_show_picture_waits_to_speak_then_shows_the_image() -> None:
     assert all(message.get("type") != "picture" for message in ui)
     first_done, _ = mapper.handle({"type": "response.done"})
     assert all(message.get("type") != "picture" for message in first_done)
+    assert first_done[-1] == {"type": "state", "name": "thinking", "detail": ""}
     spoken_done, _ = mapper.handle({"type": "response.done"})
     kinds = [str(message.get("type")) for message in spoken_done]
     assert kinds == ["picture", "state"]
     assert spoken_done[0]["image_id"] == "dinosaur"
     assert outbound[-1]["type"] == "response.create"
+
+
+def test_a_loading_picture_shows_a_placeholder_right_away() -> None:
+    mapper = RealtimeMapper()
+    ui, outbound = mapper.handle(
+        {
+            "type": "response.function_call_arguments.done",
+            "call_id": "p2",
+            "name": "show_picture",
+            "arguments": '{"topic":"shark depth"}',
+        },
+        execute=lambda _name, _args: {"loading": True, "image_id": "shark-depth", "topic": "shark depth"},
+    )
+    assert ui[0] == {"type": "picture", "image_id": "shark-depth", "loading": True}
+    assert outbound[-1]["type"] == "response.create"
+    spoken = str(outbound[-1]["response"]["instructions"])
+    assert "I'm making you a picture" in spoken
+    assert "shark depth" in spoken
+    assert "slowly" in spoken.lower()
+    assert "do not stop" in spoken.lower() or "keep" in spoken.lower()
+
+
+def test_picture_making_line_names_what_the_picture_is_about() -> None:
+    line = picture_making_line("pterodactyl")
+    assert line == "I'm making you a picture to show you pterodactyl."
+    assert "picture" in picture_making_line("").lower()
+    wait = picture_wait_instructions("pterodactyl").lower()
+    assert "slowly" in wait
+    assert "hang on" in wait
+    assert "do not stop" in wait
+    keep = picture_keep_talking("pterodactyl").lower()
+    assert "fact" in keep or "comparison" in keep
+    assert "do not say you are making" in keep
+    shown = picture_shown_line().lower()
+    assert "look" in shown
+    assert "do not say hang on" in shown
+    assert "do not say you are making" in shown
+
+
+def test_a_loading_picture_keeps_the_tutor_talking_until_it_is_ready() -> None:
+    mapper = RealtimeMapper()
+    mapper.handle(
+        {
+            "type": "response.function_call_arguments.done",
+            "call_id": "p3",
+            "name": "show_picture",
+            "arguments": '{"topic":"polar bear"}',
+        },
+        execute=lambda _name, _args: {"loading": True, "image_id": "polar-bear", "topic": "polar bear"},
+    )
+    first_done, more = mapper.handle({"type": "response.done"})
+    assert first_done[-1] == {"type": "state", "name": "thinking", "detail": ""}
+    assert more[-1]["type"] == "response.create"
+    assert "do not say you are making" in str(more[-1]["response"]["instructions"]).lower()
+    second_done, again = mapper.handle({"type": "response.done"})
+    assert second_done[-1]["name"] == "thinking"
+    assert again == []
+    leftover, _ = mapper.handle({"type": "response.output_audio.delta", "delta": "QQ=="})
+    assert leftover[0]["type"] == "audio_chunk"
+    ready_ui, ready_out = mapper.picture_ready()
+    assert ready_ui == []
+    assert ready_out[0]["type"] == "response.cancel"
+    assert "look" in str(ready_out[-1]["response"]["instructions"]).lower()
+    assert "do not say hang on" in str(ready_out[-1]["response"]["instructions"]).lower()
+    dropped, _ = mapper.handle({"type": "response.output_audio.delta", "delta": "QQ=="})
+    assert dropped == []
+    after, quiet = mapper.handle({"type": "response.done"})
+    assert after[-1] == {"type": "state", "name": "listening", "detail": ""}
+    assert quiet == []
 
 
 def test_ask_choice_does_not_show_buttons() -> None:

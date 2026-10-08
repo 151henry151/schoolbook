@@ -99,7 +99,14 @@ def spoken_child_instructions(
                 "Pick something educational that teaches history or science of the topic, "
                 "then call search_videos, vet_video, and play_video. "
                 "Say you will put on a video about that thing. "
-                "If the child wants a picture, call show_picture with the topic. "
+                "Use judgment for pictures and videos. "
+                "A picture is only if seeing something helps: how it looks, how big it is, "
+                "or a process you can see. A why-it-feels or word-only fact does not need a picture. "
+                "If watching something happen would teach better, search, vet, and play "
+                "a short educational video. If talk is enough, just talk. "
+                "When you do want a picture, call show_picture with a short topic "
+                "and a brief that tells Claude the point to illustrate. "
+                "Let Claude choose how to draw it. Do not ask for an artistic scene. "
                 "Do not call show_board with a made-up image_id. "
                 "When searching videos, use a short query like dinosaur fossils. "
                 "Search once, vet the best candidate, and play it. Do not talk between those tools. "
@@ -115,6 +122,9 @@ def spoken_child_instructions(
                 "Then ask if they want to keep watching. "
                 "If they say yes, call video_control resume. If they say no, call video_control stop. "
                 "For a different video, search and play a new one. "
+                "If he asks a question or wants to learn something, finish the answer in this turn. "
+                "Say the real fact. Only make a picture or play a video if that helps. "
+                "Do not stop after a lead-in sentence. "
                 "If he asks to talk to somebody else, or wants a boy or girl voice, call switch_voice. "
                 "If he gives you a name, or asks to call you something, call set_tutor_name with that name. "
                 "Do not say OpenAI voice names out loud. "
@@ -223,6 +233,41 @@ def clarify_speech_note(text: str) -> str:
     )
 
 
+def picture_making_line(topic: str) -> str:
+    name = " ".join((topic or "").split()) or "it"
+    return f"I'm making you a picture to show you {name}."
+
+
+def picture_wait_instructions(topic: str) -> str:
+    name = " ".join((topic or "").split()) or "it"
+    return (
+        "The child cannot read. Speak slowly, with short pauses. "
+        f"First say: {picture_making_line(topic)} "
+        "Then keep answering with new short phrases and comparisons. "
+        f"Say hang on just a moment more and I'll show you a picture of {name}. "
+        "Do not stop talking until the picture is on the screen. "
+        "Do not mention tools."
+    )
+
+
+def picture_keep_talking(topic: str) -> str:
+    name = " ".join((topic or "").split()) or "it"
+    return (
+        "The picture is still being drawn. Speak slowly. "
+        f"Give one new short fact or comparison about {name}. "
+        "Do not say you are making a picture again. "
+        "Do not say hang on again."
+    )
+
+
+def picture_shown_line() -> str:
+    return (
+        "The picture is on the screen now. "
+        "Do not say hang on. Do not say you are making a picture. "
+        "In one short sentence, tell the child to look at the picture."
+    )
+
+
 def paused_video_note() -> str:
     return (
         "The child paused the video. It is still there, paused. Listen. "
@@ -276,6 +321,39 @@ def looks_like_fantasy(text: str) -> bool:
     lowered = (text or "").lower()
     lowered = lowered.replace("komodo dragon", " ").replace("komodo", " ")
     return any(re.search(r"\b" + re.escape(marker) + r"\b", lowered) for marker in _FANTASY_MARKERS)
+
+
+_GREETING = re.compile(r"\bhow are you\b|\bhow's it going\b|\bhow is it going\b", re.I)
+_CURIOUS = re.compile(
+    r"(?:"
+    r"\b(?:why|what|where|when|who|which)\b|"
+    r"\bhow (?:deep|big|far|tall|long|fast|old|much|many|does|do|can|come)\b|"
+    r"\bcan i learn\b|"
+    r"\bi want to (?:know|learn)\b|"
+    r"\b(?:tell|teach|explain) me\b|"
+    r"\bdo you know\b"
+    r")",
+    re.I,
+)
+
+
+def looks_like_curious_question(text: str) -> bool:
+    stripped = (text or "").strip()
+    if not stripped or video_topic(stripped) or _GREETING.search(stripped):
+        return False
+    return bool(_CURIOUS.search(stripped))
+
+
+def answer_first_nudge(text: str, *, name: str = "the child") -> str | None:
+    if looks_like_fantasy(text) or not looks_like_curious_question(text):
+        return None
+    return (
+        f"{name} asked a question. Finish the answer in this turn. "
+        "Say the real fact now. Talk is often enough. "
+        "Only call show_picture if a picture would help him see the idea. "
+        "If a short educational video would teach it better, search, vet, and play one. "
+        "Do not stop after a lead-in sentence."
+    )
 
 
 def real_world_nudge(text: str, *, name: str = "the child") -> str | None:
@@ -356,6 +434,7 @@ def session_update(
                 "output": {
                     "format": {"type": "audio/pcm", "rate": OUTPUT_RATE},
                     "voice": chosen,
+                    "speed": 0.85,
                 },
             },
             "tools": tools,
@@ -426,13 +505,17 @@ REALTIME_TOOLS: list[dict[str, object]] = [
         "type": "function",
         "name": "show_picture",
         "description": (
-            "Make an educational picture of the child's topic and show it. "
-            "Use this instead of show_board when they ask to see what something looks like."
+            "Show an educational picture only if seeing it helps. "
+            "Pass a short topic and a brief that states the point to illustrate. "
+            "Claude chooses how to draw it. Skip this for word-only why questions."
         ),
         "parameters": {
             "type": "object",
-            "properties": {"topic": {"type": "string"}},
-            "required": ["topic"],
+            "properties": {
+                "topic": {"type": "string"},
+                "brief": {"type": "string"},
+            },
+            "required": ["topic", "brief"],
         },
     },
     {
@@ -473,10 +556,29 @@ class RealtimeMapper:
     hold_video: bool = False
     pending_picture: dict[str, object] | None = None
     hold_picture: bool = False
+    waiting_picture: bool = False
+    picture_fills: int = 0
+    picture_topic: str = ""
     child_partial: str = ""
     tutor_partial: str = ""
     drop_input: bool = False
     drop_output: bool = False
+
+    def picture_ready(self) -> tuple[list[dict[str, object]], list[dict[str, object]]]:
+        self.waiting_picture = False
+        self.picture_fills = 0
+        self.picture_topic = ""
+        self.drop_output = True
+        return (
+            [],
+            [
+                {"type": "response.cancel"},
+                {
+                    "type": "response.create",
+                    "response": {"instructions": picture_shown_line()},
+                },
+            ],
+        )
 
     def append_audio(self, pcm_b64: str) -> dict[str, object]:
         return {"type": "input_audio_buffer.append", "audio": pcm_b64}
@@ -488,6 +590,9 @@ class RealtimeMapper:
         self.hold_video = False
         self.pending_picture = None
         self.hold_picture = False
+        self.waiting_picture = False
+        self.picture_fills = 0
+        self.picture_topic = ""
         self.drop_input = True
         self.drop_output = True
         return (
@@ -545,6 +650,24 @@ class RealtimeMapper:
         if kind == "input_audio_buffer.speech_stopped":
             return ([{"type": "state", "name": "thinking", "detail": ""}], [])
         if kind == "response.done":
+            if self.waiting_picture:
+                if self.picture_fills >= 1:
+                    return ([{"type": "state", "name": "thinking", "detail": ""}], [])
+                self.picture_fills += 1
+                return (
+                    [{"type": "state", "name": "thinking", "detail": ""}],
+                    [
+                        {
+                            "type": "response.create",
+                            "response": {
+                                "instructions": picture_keep_talking(self.picture_topic)
+                            },
+                        }
+                    ],
+                )
+            holding = (self.pending_video is not None and self.hold_video) or (
+                self.pending_picture is not None and self.hold_picture
+            )
             messages: list[dict[str, object]] = []
             if self.pending_video is not None and self.hold_video:
                 self.hold_video = False
@@ -556,25 +679,17 @@ class RealtimeMapper:
             elif self.pending_picture is not None:
                 messages.append(self.pending_picture)
                 self.pending_picture = None
-            messages.append({"type": "state", "name": "listening", "detail": ""})
+            if holding:
+                messages.append({"type": "state", "name": "thinking", "detail": ""})
+            else:
+                messages.append({"type": "state", "name": "listening", "detail": ""})
             return (messages, [])
         if kind == "conversation.item.input_audio_transcription.delta":
             piece = str(event.get("delta") or event.get("transcript") or "")
             if not piece:
                 return ([], [])
             self.child_partial += piece
-            return (
-                [
-                    {
-                        "type": "transcript",
-                        "turn_id": self.turn_id,
-                        "role": "child",
-                        "text": self.child_partial,
-                        "partial": True,
-                    }
-                ],
-                [],
-            )
+            return ([], [])
         if kind in {"response.output_audio_transcript.delta", "response.audio_transcript.delta"}:
             piece = str(event.get("delta") or event.get("transcript") or "")
             if not piece:
@@ -666,7 +781,34 @@ class RealtimeMapper:
                             },
                         }
                     )
-                outbound.append({"type": "response.create"})
+                answer = answer_first_nudge(cleaned, name=self.child_name) if cleaned else None
+                if answer:
+                    outbound.append(
+                        {
+                            "type": "conversation.item.create",
+                            "item": {
+                                "type": "message",
+                                "role": "system",
+                                "content": [{"type": "input_text", "text": answer}],
+                            },
+                        }
+                    )
+                    outbound.append(
+                        {
+                            "type": "response.create",
+                            "response": {
+                                "instructions": (
+                                    "Answer the child's question in this turn. "
+                                    "Say the real fact. "
+                                    "Only make a picture if seeing it helps. "
+                                    "A video is fine if watching would teach it better. "
+                                    "Do not stop after a lead-in sentence."
+                                )
+                            },
+                        }
+                    )
+                else:
+                    outbound.append({"type": "response.create"})
             self.drop_output = False
             return (messages, outbound)
         if kind in {"response.audio_transcript.done", "response.output_audio_transcript.done"}:
@@ -739,6 +881,11 @@ class RealtimeMapper:
             elements = args.get("elements")
             if isinstance(elements, list):
                 ui.append({"type": "board", "turn_id": self.turn_id, "elements": elements})
+        elif name == "show_picture" and result.get("loading") and result.get("image_id"):
+            self.waiting_picture = True
+            self.picture_fills = 0
+            self.picture_topic = str(result.get("topic") or args.get("topic") or "it")
+            ui.append({"type": "picture", "image_id": str(result["image_id"]), "loading": True})
         elif name == "show_picture" and result.get("image_id") and "error" not in result:
             self.pending_picture = {"type": "picture", "image_id": str(result["image_id"])}
             self.hold_picture = True
@@ -812,8 +959,17 @@ class RealtimeMapper:
                     "output": json.dumps(result),
                 },
             },
-            {"type": "response.create"},
         ]
+        if name == "show_picture" and result.get("loading"):
+            topic = str(result.get("topic") or args.get("topic") or "it")
+            outbound.append(
+                {
+                    "type": "response.create",
+                    "response": {"instructions": picture_wait_instructions(topic)},
+                }
+            )
+        else:
+            outbound.append({"type": "response.create"})
         return (ui, outbound)
 
 
@@ -880,6 +1036,11 @@ class RealtimeTalk:
             for outgoing in outbound:
                 await self._socket.send(json.dumps(outgoing))
         return ui
+
+    async def picture_ready(self) -> None:
+        _ui, outbound = self.mapper.picture_ready()
+        for outgoing in outbound:
+            await self._send_outgoing(outgoing)
 
     async def add_system_note(self, text: str) -> None:
         if self._socket is None or not text.strip():

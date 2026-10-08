@@ -40,9 +40,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Turn a child's video request into a parent briefing so the tutor picks history or science, not baby TV
 - Finish the tutor's spoken reply before a video starts
 - Keep the child's words on screen above the tutor reply, with playful type and speaker icons
-- Show the child's words as they are spoken and highlight the tutor word that is playing
+- Highlight the tutor word that is playing
 - Listen again when a video is paused so the child can ask for a different one or change the subject
-- Generate an educational picture with OpenAI and show it when the child asks to see something
+- Have the tutor write a scale-diagram brief and let Claude draw it as SVG, instead of an OpenAI artistic scene
 - Keep YouTube search queries short, retry empty caches, and fall back to an approved video on the same topic
 - Keep the microphone closed until tutor audio finishes so the tutor does not answer its own voice
 - Ask the child to confirm when a transcript looks garbled instead of guessing
@@ -55,6 +55,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Add a stop-sign button that pauses listening until the child taps the microphone again
 - Let the child switch the tutor voice by asking to talk to somebody else, or to a boy or girl voice
 - Let the child give the tutor a name by voice and have the tutor answer to that name
+- Answer a curious question with talk and a comparison picture first, and play a video only when the child asks to watch one
+- Finish a question answer in the same turn instead of stopping after a lead-in sentence
+- Show a blurry placeholder with a spinner while a picture is generated, and make the picture off the live talk socket so replies are not cut off
+- Show the child's finished sentence as the agent heard it, after they stop talking
+- Hide talk words while a picture is on screen so the image is in focus
+- Speak that a picture is being made, naming what it will show, while it generates
+- Center the microphone and stop buttons at the bottom, and show a large pause mark between them when listening is stopped
+- Keep a picture in a frame above the microphone and stop buttons so those buttons stay visible without covering the image
+- Keep the tutor talking slowly about the question until the picture is ready, and mention that the picture is almost there
+- Stop the hang-on loop when a picture appears, and require comparison objects in the diagram to be big and visible
+- Have the tutor state the point to illustrate and let Claude choose the drawing, not only size-scale charts
+- Only make a picture when seeing helps, and allow a video instead when watching would teach better
+- Stop repeating filler talk after one extra beat while a picture loads
 
 ## [0.9.0] - 2026-10-07
 

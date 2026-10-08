@@ -127,6 +127,9 @@ class ToolPolicy:
         topic = args.get("topic")
         if not isinstance(topic, str) or not topic.strip() or len(topic) > 80:
             return Decision(False, "picture topic must be a short phrase")
+        brief = args.get("brief", topic)
+        if not isinstance(brief, str) or not brief.strip() or len(brief) > 1200:
+            return Decision(False, "picture brief must be short directions")
         return Decision(True, "ok")
 
     def _check_switch_voice(self, args: dict[str, object], ctx: PolicyContext) -> Decision:

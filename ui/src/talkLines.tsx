@@ -38,14 +38,16 @@ export function TalkLines({
   tutor,
   spokenIndex = -1,
   overVideo = false,
+  hidden = false,
 }: {
   name: string;
   child: string;
   tutor: string;
   spokenIndex?: number;
   overVideo?: boolean;
+  hidden?: boolean;
 }) {
-  if (!child && !tutor) return null;
+  if (hidden || (!child && !tutor)) return null;
   return (
     <section className={overVideo ? "talk-lines on-video" : "talk-lines"} aria-label="what we said">
       {child ? (

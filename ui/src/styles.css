@@ -70,8 +70,53 @@ button { min-height: 64px; min-width: 64px; font-size: 1.4rem; }
   box-shadow: 0 0 0 4px #ffe27a;
 }
 .status { font-size: 1.4rem; opacity: 0.8; }
-.picture-overlay { position: fixed; inset: 0; background: #1c1915; z-index: 12; display: grid; place-items: center; }
+.picture-overlay {
+  position: fixed;
+  inset: 0;
+  background: #1c1915;
+  z-index: 12;
+  display: grid;
+  place-items: center;
+}
+.picture-overlay.above-controls {
+  padding: 1rem 1rem 9.6rem;
+}
+.picture-frame {
+  width: min(94vw, 64rem);
+  height: 100%;
+  max-height: calc(100vh - 10.8rem);
+  display: grid;
+  place-items: center;
+  overflow: hidden;
+  border-radius: 1.2rem;
+  background: #11100e;
+}
 .picture-overlay img, .board-picture { max-width: 100%; max-height: 100%; object-fit: contain; }
+.picture-frame img { width: auto; height: auto; max-width: 100%; max-height: 100%; }
+.picture-loading {
+  position: relative;
+  width: min(80vw, 28rem);
+  height: min(80vw, 28rem);
+  display: grid;
+  place-items: center;
+}
+.picture-placeholder {
+  position: absolute;
+  inset: 0;
+  border-radius: 1.4rem;
+  background: radial-gradient(circle at 30% 30%, #8aa4b5, #3a4a55 55%, #1c1915);
+  filter: blur(18px);
+}
+.picture-spinner {
+  width: 4.2rem;
+  height: 4.2rem;
+  border: 0.45rem solid rgba(255, 255, 255, 0.25);
+  border-top-color: #fff;
+  border-radius: 999px;
+  animation: picture-spin 0.8s linear infinite;
+  z-index: 1;
+}
+@keyframes picture-spin { to { transform: rotate(360deg); } }
 .board-picture { max-width: min(90vw, 40rem); max-height: 50vh; }
 .video-overlay { position: fixed; inset: 0; background: black; z-index: 10; }
 .video-overlay.is-hidden { visibility: hidden; }
@@ -98,13 +143,22 @@ button { min-height: 64px; min-width: 64px; font-size: 1.4rem; }
 .home-button { position: fixed; left: 1rem; bottom: 1rem; }
 .talk-controls {
   position: fixed;
-  right: 1.2rem;
+  left: 50%;
   bottom: 1.2rem;
-  display: grid;
-  gap: 0.75rem;
-  justify-items: center;
+  transform: translateX(-50%);
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 1.4rem;
   z-index: 28;
 }
+.pause-mark {
+  width: 7.2rem;
+  height: 7.2rem;
+  display: grid;
+  place-items: center;
+}
+.pause-mark svg { width: 7.2rem; height: 7.2rem; display: block; }
 .listen-button,
 .stop-button {
   width: 5.6rem;

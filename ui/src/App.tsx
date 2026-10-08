@@ -31,6 +31,8 @@ export function App() {
   const [videoId, setVideoId] = useState("");
   const [videoPaused, setVideoPaused] = useState(false);
   const [pictureId, setPictureId] = useState("");
+  const [pictureLoading, setPictureLoading] = useState(false);
+  const pictureLoadingRef = useRef(false);
   const [offline, setOffline] = useState(false);
   const [unlock, setUnlock] = useState(false);
   const [token, setToken] = useState("");
@@ -93,6 +95,9 @@ export function App() {
           video_id?: string;
           action?: string;
           image_id?: string;
+          loading?: boolean;
+          error?: boolean;
+          partial?: boolean;
           name?: string;
           options?: Choice[];
           pcm_b64?: string;
@@ -105,6 +110,7 @@ export function App() {
           if (message.voice) setVoice(message.voice);
         }
         if (message.type === "transcript" && message.text) {
+          if (message.role === "child" && message.partial) return;
           if (freshListen.current && message.role === "tutor") return;
           setTalk((current) => nextTalkPair(current, message.role ?? "", message.text ?? ""));
           if (message.role === "tutor") {
@@ -140,21 +146,40 @@ export function App() {
         if (message.type === "video" && (message.action === "stop" || message.action === "destroy")) {
           pendingVideo.current = "";
           setPictureId("");
+          setPictureLoading(false);
+          pictureLoadingRef.current = false;
           setVideoPaused(false);
           setVideoId("");
         }
         if (message.type === "video" && message.action === "resume") {
+          pictureLoadingRef.current = false;
+          setPictureLoading(false);
           setPictureId("");
           setVideoPaused(false);
         }
-        if (message.type === "picture" && message.image_id) {
-          pendingPicture.current = message.image_id;
-          void queue.current.whenIdle().then(() => {
-            const ready = pendingPicture.current;
-            if (!ready) return;
-            pendingPicture.current = "";
-            setPictureId(ready);
-          });
+        if (message.type === "picture") {
+          if (message.loading) {
+            pictureLoadingRef.current = true;
+            setPictureLoading(true);
+            setPictureId(String(message.image_id || "pending"));
+            return;
+          }
+          if (message.image_id) {
+            pendingPicture.current = message.image_id;
+            const reveal = () => {
+              const ready = pendingPicture.current;
+              if (!ready) return;
+              pendingPicture.current = "";
+              pictureLoadingRef.current = false;
+              setPictureLoading(false);
+              setPictureId(ready);
+            };
+            if (pictureLoadingRef.current) {
+              reveal();
+              return;
+            }
+            void queue.current.whenIdle().then(reveal);
+          }
         }
         if (message.type === "state" && message.name === "offline") setOffline(true);
         if (message.type === "state" && message.name === "home") setOffline(false);
@@ -361,11 +386,14 @@ export function App() {
         child={talk.child}
         tutor={talk.tutor}
         spokenIndex={spokenIndex}
-        overVideo={Boolean((videoId && videoPaused) || pictureId)}
+        overVideo={Boolean(videoId && videoPaused)}
+        hidden={Boolean(pictureId || pictureLoading)}
       />
-      <p className={(videoId && videoPaused) || pictureId ? "status on-video" : "status"} role="status">
-        {status}
-      </p>
+      {pictureId || pictureLoading ? null : (
+        <p className={videoId && videoPaused ? "status on-video" : "status"} role="status">
+          {status}
+        </p>
+      )}
       {offline ? (
         <section aria-label="offline apps">
           <p>The tutor is resting.</p>
@@ -376,11 +404,19 @@ export function App() {
           ))}
         </section>
       ) : null}
-      <button type="button" className="home-button" onClick={() => send({ type: "home" })}>
-        Home
-      </button>
+      {pictureId || pictureLoading ? null : (
+        <button type="button" className="home-button" onClick={() => send({ type: "home" })}>
+          Home
+        </button>
+      )}
       {!(videoId && !videoPaused) ? (
-        <div className={(videoId && videoPaused) || pictureId ? "talk-controls on-media" : "talk-controls"}>
+        <div
+          className={
+            (videoId && videoPaused) || pictureId || pictureLoading
+              ? "talk-controls centered on-media"
+              : "talk-controls centered"
+          }
+        >
           <button type="button" className="listen-button" aria-label="start talking" onClick={resetListen}>
             <svg viewBox="0 0 64 64" aria-hidden="true">
               <rect x="24" y="8" width="16" height="28" rx="8" fill="currentColor" />
@@ -400,6 +436,14 @@ export function App() {
               />
             </svg>
           </button>
+          {listenPaused ? (
+            <div className="pause-mark" role="img" aria-label="paused">
+              <svg viewBox="0 0 64 64" aria-hidden="true">
+                <rect x="14" y="8" width="12" height="48" rx="4" fill="#e07a3d" />
+                <rect x="38" y="8" width="12" height="48" rx="4" fill="#e07a3d" />
+              </svg>
+            </div>
+          ) : null}
           <button type="button" className="stop-button" aria-label="stop" onClick={pauseListen}>
             <svg viewBox="0 0 64 64" aria-hidden="true">
               <polygon
@@ -434,10 +478,13 @@ export function App() {
           <button type="submit">Send</button>
         </form>
       ) : null}
-      {pictureId ? (
+      {pictureId || pictureLoading ? (
         <PictureOverlay
           imageId={pictureId}
+          loading={pictureLoading}
           onClose={() => {
+            pictureLoadingRef.current = false;
+            setPictureLoading(false);
             setPictureId("");
           }}
         />
@@ -446,8 +493,10 @@ export function App() {
         <VideoOverlay
           videoId={videoId}
           paused={videoPaused}
-          hidden={Boolean(pictureId)}
+          hidden={Boolean(pictureId || pictureLoading)}
           onClose={() => {
+            pictureLoadingRef.current = false;
+            setPictureLoading(false);
             setPictureId("");
             setVideoPaused(false);
             setVideoId("");

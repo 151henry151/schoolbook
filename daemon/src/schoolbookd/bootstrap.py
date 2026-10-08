@@ -72,7 +72,7 @@ def build_host(config: SchoolbookConfig, secrets: Secrets) -> Host:
             config.notifications.email_to,
         ),
         min_video_pause_s=float(profile.watch_along_pause_min_seconds),
-        pictures=_pictures(secrets),
+        pictures=_pictures(secrets, config.summary_model),
         images_dir=config.images_dir,
     )
     return Host(
@@ -148,12 +148,16 @@ def _duration(window: list[int]) -> tuple[int, int]:
     return (window[0], window[1])
 
 
-def _pictures(secrets: Secrets) -> PictureMaker | None:
-    if not secrets.openai_api_key:
-        return None
-    from schoolbookd.providers.openai_images import OpenAIImages
+def _pictures(secrets: Secrets, model: str = "claude-sonnet-5-5") -> PictureMaker | None:
+    if secrets.anthropic_api_key:
+        from schoolbookd.providers.claude_pictures import ClaudePictures
 
-    return OpenAIImages(secrets.openai_api_key)
+        return ClaudePictures(secrets.anthropic_api_key, model=model)
+    if secrets.openai_api_key:
+        from schoolbookd.providers.openai_images import OpenAIImages
+
+        return OpenAIImages(secrets.openai_api_key)
+    return None
 
 
 def _youtube(secrets: Secrets) -> SearchClient | None:

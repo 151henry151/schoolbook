@@ -12,9 +12,9 @@ from pathlib import Path
 
 from schoolbookd.content.apps import AppManifest, build_argv
 from schoolbookd.content.catalog import VideoCatalog
-from schoolbookd.content.pictures import PictureMaker, picture_id, picture_prompt
-from schoolbookd.db.models import ImageRow, Video
+from schoolbookd.content.pictures import PictureMaker, picture_id, picture_prompt, picture_suffix
 from schoolbookd.content.playback import pause_allowed, split_summary
+from schoolbookd.db.models import ImageRow, Video
 from schoolbookd.db.store import Store
 from schoolbookd.learner.memory import assemble_profile
 from schoolbookd.notify import Notifier
@@ -71,6 +71,23 @@ class Runtime:
             return None
         path = Path(row.path)
         return path if path.is_file() else None
+
+    def finish_picture(self, live: LiveState, topic: str, image_id: str) -> dict[str, object]:
+        if self.pictures is None or self.images_dir is None:
+            return {"error": "pictures are not ready"}
+        self.images_dir.mkdir(parents=True, exist_ok=True)
+        path = self.image_path(image_id)
+        if path is None:
+            path = self._save_picture(image_id, self.pictures.generate(picture_prompt(topic)))
+        self.store.add_image(image_id, str(path), topic, "generated", "generated")
+        live.screen = "board"
+        return {"shown": True, "image_id": image_id}
+
+    def _save_picture(self, image_id: str, data: bytes) -> Path:
+        assert self.images_dir is not None
+        path = self.images_dir / f"{image_id}{picture_suffix(data)}"
+        path.write_bytes(data)
+        return path
 
     def policy_context(self, live: LiveState) -> PolicyContext:
         disabled = self.store.get_setting("disabled_apps", [])
@@ -209,25 +226,42 @@ class Runtime:
 
         return render_age_profile(self.age_profile)
 
-    def run_tool(self, live: LiveState, name: str, args: dict[str, object]) -> dict[str, object]:
+    def run_tool(
+        self,
+        live: LiveState,
+        name: str,
+        args: dict[str, object],
+        *,
+        defer_pictures: bool = False,
+    ) -> dict[str, object]:
         decision = ToolPolicy().check(name, args, self.policy_context(live))
         if not decision.allowed:
             return {"error": decision.reason}
-        return self._execute(live, name, args)
+        return self._execute(live, name, args, defer_pictures=defer_pictures)
 
-    def _execute(self, live: LiveState, name: str, args: dict[str, object]) -> dict[str, object]:
+    def _execute(
+        self,
+        live: LiveState,
+        name: str,
+        args: dict[str, object],
+        *,
+        defer_pictures: bool = False,
+    ) -> dict[str, object]:
         if name == "show_board":
             live.screen = "board"
             return {"shown": True}
         if name == "show_picture":
             if self.pictures is None or self.images_dir is None:
                 return {"error": "pictures are not ready"}
-            topic = str(args["topic"]).strip()
-            image_id = picture_id(topic)
+            topic = str(args.get("topic") or args.get("brief") or "").strip()
+            brief = str(args.get("brief") or topic).strip()
+            image_id = picture_id(topic, brief)
             self.images_dir.mkdir(parents=True, exist_ok=True)
-            path = self.images_dir / f"{image_id}.png"
-            if not path.is_file():
-                path.write_bytes(self.pictures.generate(picture_prompt(topic)))
+            path = self.image_path(image_id)
+            if path is None and defer_pictures:
+                return {"loading": True, "image_id": image_id, "topic": topic, "brief": brief}
+            if path is None:
+                path = self._save_picture(image_id, self.pictures.generate(picture_prompt(brief)))
             self.store.add_image(image_id, str(path), topic, "generated", "generated")
             live.screen = "board"
             return {"shown": True, "image_id": image_id}

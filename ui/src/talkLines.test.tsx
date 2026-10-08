@@ -30,6 +30,19 @@ test("the spoken tutor word is marked for read-along", () => {
   expect(screen.getByText("put").className).toContain("spoken-now");
 });
 
+test("hidden talk lines take the words off the screen", () => {
+  render(
+    <TalkLines
+      name="Arum"
+      child="How big is a pterodactyl?"
+      tutor="About as wide as a house door."
+      hidden
+    />,
+  );
+  expect(screen.queryByLabelText("what we said")).toBeNull();
+  expect(screen.queryByText("How big is a pterodactyl?")).toBeNull();
+});
+
 test("talk lines show both speakers with initials", () => {
   render(
     <TalkLines name="Arum" child="Show me dinosaurs." tutor="I will put on a dinosaur video." />,
