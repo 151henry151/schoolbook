@@ -6,6 +6,7 @@
 from __future__ import annotations
 
 import array
+import asyncio
 import json
 import re
 import sys
@@ -126,6 +127,9 @@ def spoken_child_instructions(
                 "He cannot read. If a system note says the words were unclear, speak those words out loud: "
                 "It sounded like you said [the words]. Is that what you said? "
                 "Do not ask that on a normal sentence. "
+                "The child’s finalized transcript is provided as a user text message. "
+                "Respond to those exact words; preserve names, channels, and numbers. "
+                "Do not invent a different phrase you think you heard. "
                 "TV and video-game characters are different: be warm once, then steer to something real. "
                 "Do not dwell on those pretend worlds. "
                 "If a video is paused and the child talks, listen. "
@@ -157,7 +161,7 @@ _TOPIC_PATTERNS = (
         r"(?:some |a |an )?(.+?)\s+videos?\b",
         re.I,
     ),
-    re.compile(r"(?:videos?|movies?|films?)\s+(?:of|about|on)\s+(.+)", re.I),
+    re.compile(r"(?:videos?|movies?|films?|shows?)\s+(?:of|about|on)\s+(.+)", re.I),
     re.compile(
         r"(?:show me|watch|put on)\s+(?:a |an |some )?(?:video|movie|film)s?\s+(?:of|about|on)?\s*(.+)",
         re.I,
@@ -612,7 +616,8 @@ def video_watch_briefing(child_text: str, *, name: str = "the child") -> str | N
         f"Pick something educational that will teach him something good about the history of {topic} "
         f"or the science behind {topic}. Pick out a good educational video from YouTube and play it. "
         f"Do not pick a baby song, nursery cartoon, or Cocomelon-style show. "
-        f"When you speak to him, just say you will put on a video about {topic}."
+        f"When you speak to him, just say you will put on a video about {topic}. "
+        "Preserve any requested channel or creator in the search query."
     )
 
 Execute = Callable[[str, dict[str, object]], dict[str, object]]
@@ -861,6 +866,8 @@ class RealtimeMapper:
     tutor_partial: str = ""
     drop_input: bool = False
     drop_output: bool = False
+    completed_calls: set[str] = field(default_factory=set)
+    transcribed_items: set[str] = field(default_factory=set)
 
     def picture_ready(self) -> tuple[list[dict[str, object]], list[dict[str, object]]]:
         if not self.waiting_picture:
@@ -918,6 +925,8 @@ class RealtimeMapper:
             "conversation.item.input_audio_transcription.completed",
             "conversation.item.input_audio_transcription.failed",
         }:
+            if kind.endswith((".completed", ".failed")) and event.get("item_id"):
+                return ([], [{"type": "conversation.item.delete", "item_id": event["item_id"]}])
             return ([], [])
         if self.drop_output and kind in {
             "response.output_audio.delta",
@@ -998,17 +1007,42 @@ class RealtimeMapper:
                 [],
             )
         if kind == "conversation.item.input_audio_transcription.failed":
-            return ([], [])
+            item_id = event.get("item_id")
+            failed_discard: list[dict[str, object]] = (
+                [{"type": "conversation.item.delete", "item_id": item_id}] if item_id else []
+            )
+            return (
+                [{"type": "error", "message": "Could not understand speech. Tap the microphone to try again."}],
+                failed_discard,
+            )
         if kind == "conversation.item.input_audio_transcription.completed":
             text = str(event.get("transcript", "")).strip() or self.child_partial.strip()
             self.child_partial = ""
-            decision, cleaned = child_speech_decision(text)
+            item_id = event.get("item_id")
+            if isinstance(item_id, str):
+                if item_id in self.transcribed_items:
+                    return ([], [])
+                self.transcribed_items.add(item_id)
+            # Realtime audio interpretation and ASR are independent. Replace this
+            # audio item with the same final text we display before asking for a reply.
+            discard: list[dict[str, object]] = (
+                [{"type": "conversation.item.delete", "item_id": item_id}] if item_id else []
+            )
+            decision, _filtered = child_speech_decision(text)
+            cleaned = " ".join(text.split())  # Keep names, digits, and meaningful words intact.
             if decision == "wait":
                 return (
                     [{"type": "state", "name": "listening", "detail": ""}],
-                    [{"type": "input_audio_buffer.clear"}],
+                    [*discard, {"type": "input_audio_buffer.clear"}],
                 )
-            outbound: list[dict[str, object]] = []
+            outbound: list[dict[str, object]] = [
+                *discard,
+                {
+                    "type": "conversation.item.create",
+                    "item": {"type": "message", "role": "user",
+                             "content": [{"type": "input_text", "text": cleaned}]},
+                },
+            ]
             messages: list[dict[str, object]] = [
                 {
                     "type": "transcript",
@@ -1038,15 +1072,6 @@ class RealtimeMapper:
                                 f"The child cannot read. Speak this out loud, word for word, then wait: {line}"
                             )
                         },
-                    }
-                )
-                messages.append(
-                    {
-                        "type": "transcript",
-                        "turn_id": self.turn_id,
-                        "role": "tutor",
-                        "text": line,
-                        "partial": False,
                     }
                 )
             else:
@@ -1203,6 +1228,9 @@ class RealtimeMapper:
     ) -> tuple[list[dict[str, object]], list[dict[str, object]]]:
         name = str(event.get("name", ""))
         call_id = str(event.get("call_id", "call"))
+        if call_id in self.completed_calls:
+            return ([], [])
+        self.completed_calls.add(call_id)
         raw_args = event.get("arguments", "{}")
         try:
             args = json.loads(str(raw_args))
@@ -1348,6 +1376,10 @@ class RealtimeTalk:
     tutor_name: str = DEFAULT_TUTOR_NAME
     _socket: Any = None
     _last_mic_log: float = 0.0
+    _response_active: bool = False
+    _pending_response: dict[str, object] | None = None
+    _emit: Emit | None = None
+    input_paused: bool = False
 
     async def start(self) -> None:
         opener = self.connect or _default_connect
@@ -1407,7 +1439,10 @@ class RealtimeTalk:
         return ui
 
     async def picture_ready(self) -> None:
-        _ui, outbound = self.mapper.picture_ready()
+        ui, outbound = self.mapper.picture_ready()
+        if self._emit is not None:
+            for message in ui:
+                await self._emit(message)
         for outgoing in outbound:
             await self._send_outgoing(outgoing)
 
@@ -1427,10 +1462,15 @@ class RealtimeTalk:
             )
         )
         if speak:
-            await self._socket.send(json.dumps({"type": "response.create"}))
+            await self._send_outgoing({"type": "response.create"})
 
     async def _send_outgoing(self, outgoing: dict[str, object]) -> None:
         kind = str(outgoing.get("type", ""))
+        if kind == "response.create":
+            if self._response_active:
+                self._pending_response = outgoing
+                return
+            self._response_active = True
         if kind == "schoolbook.reconnect":
             await self.reconnect(str(outgoing.get("voice") or DEFAULT_TUTOR_VOICE))
             if self._socket is not None:
@@ -1456,6 +1496,7 @@ class RealtimeTalk:
             await self._socket.send(json.dumps(outgoing))
 
     async def pump(self, emit: Emit) -> None:
+        self._emit = emit
         while self._socket is not None:
             socket = self._socket
             try:
@@ -1474,6 +1515,15 @@ class RealtimeTalk:
             if not isinstance(event, dict):
                 continue
             kind = str(event.get("type", ""))
+            if self.input_paused:
+                if kind.startswith("input_audio_buffer.speech_"):
+                    continue
+                if kind.startswith("conversation.item.input_audio_transcription."):
+                    self.mapper.drop_input = True
+            if kind == "response.created":
+                self._response_active = True
+            elif kind == "response.done":
+                self._response_active = False
             if kind in {
                 "input_audio_buffer.speech_started",
                 "input_audio_buffer.speech_stopped",
@@ -1484,11 +1534,40 @@ class RealtimeTalk:
             }:
                 extra = event.get("transcript") or event.get("error") or ""
                 print(f"schoolbook: realtime {kind} {extra}".strip(), file=sys.stderr)
-            ui, outbound = self.mapper.handle(event, execute=self.execute)
+            # Network-bound searches must not block the WebSocket handler receiving Stop.
+            # Other tools stay on the event loop, where picture tasks and app callbacks live.
+            call = event.get("item") if kind == "response.output_item.done" else event
+            execute = self.execute
+            if (
+                kind in {"response.function_call_arguments.done", "response.output_item.done"}
+                and isinstance(call, dict)
+                and call.get("name") == "search_videos"
+                and str(call.get("call_id", "call")) not in self.mapper.completed_calls
+                and not self.mapper.drop_output
+            ):
+                try:
+                    args = json.loads(str(call.get("arguments", "{}")))
+                    result = await asyncio.to_thread(
+                        self.execute, "search_videos", args if isinstance(args, dict) else {}
+                    )
+                except Exception:
+                    result = {"error": "video search failed"}
+
+                def cached_result(
+                    _name: str, _args: dict[str, object], value: dict[str, object] = result,
+                ) -> dict[str, object]:
+                    return value
+
+                execute = cached_result
+            ui, outbound = self.mapper.handle(event, execute=execute)
             for message in ui:
                 await emit(message)
             for outgoing in outbound:
                 await self._send_outgoing(outgoing)
+            if kind == "response.done" and self._pending_response is not None:
+                pending = self._pending_response
+                self._pending_response = None
+                await self._send_outgoing(pending)
 
     async def close(self) -> None:
         socket = self._socket

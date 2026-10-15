@@ -57,6 +57,12 @@ For an existing CF-30 installation, update the application and rebuild `ui/`, in
 
 The main screen shows the laptop's battery percentage at the top left, with a lightning bolt while charging and a red indicator at 20% or below when discharging. It refreshes every 30 seconds and is hidden while a video, song player, or game is open. Machines without readable battery information show no indicator.
 
+Tap the **microphone** to cancel the current speech attempt and start a fresh connection. Tap the **stop sign** to cancel the attempt and immediately silence the tutor; listening stays paused until the microphone is tapped again. A fresh connection clears the live AI conversation context, while saved learner data and transcripts remain. Connection setup and network waits do not block these controls. A disconnected browser can reconnect on the next microphone tap.
+
+For each speech turn, the finalized transcription shown on screen replaces the corresponding audio message in the tutor’s conversation before a reply is requested. This gives the tutor the same words the parent sees, rather than a separate interpretation of the audio. Names, numbers, and meaningful words are preserved. Unrecognized audio is discarded; a transcription failure shows a recoverable microphone error. Spoken replies still use OpenAI Realtime audio.
+
+While a song or video is playing, microphone capture is stopped and the backend ignores speech input, so talking cannot interrupt playback. Pause or close the player to talk to the tutor again.
+
 ## License
 
 GPL-3.0-or-later. See [LICENSE](LICENSE) and [NOTICE](NOTICE).

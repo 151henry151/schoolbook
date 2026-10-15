@@ -46,6 +46,9 @@ export function App() {
   const [token, setToken] = useState("");
   const [draft, setDraft] = useState("");
   const [socket, setSocket] = useState<WebSocket | null>(null);
+  const [connectionEpoch, setConnectionEpoch] = useState(0);
+  const attemptId = useRef("");
+  const mediaPlaying = useRef(false);
   const [status, setStatus] = useState<TalkStatusKind>("listening");
   const [listenPaused, setListenPaused] = useState(false);
   const listenPausedRef = useRef(false);
@@ -128,7 +131,18 @@ export function App() {
           sample_rate?: number;
           voice?: string;
           detail?: string;
+          attempt_id?: string;
         };
+        if (message.attempt_id && message.attempt_id !== attemptId.current) return;
+        const receivedAttempt = attemptId.current;
+        if (message.type === "error") {
+          queue.current.interrupt();
+          speaking.current = false;
+          freshListen.current = true;
+          setStatus("connection-error");
+          return;
+        }
+        if (listenPausedRef.current && message.type !== "hello_ok") return;
         if (message.type === "hello_ok") {
           if (message.learner_name) setName(message.learner_name);
           if (message.voice) setVoice(message.voice);
@@ -145,7 +159,7 @@ export function App() {
         }
         if (message.type === "audio_chunk" && message.turn_id && message.pcm_b64) {
           if (phaseRef.current !== "talk") return;
-          if (freshListen.current || appIdRef.current) return;
+          if (freshListen.current || appIdRef.current || mediaPlaying.current) return;
           speaking.current = true;
           setStatus("talking");
           const pcm = decodePcm16(message.pcm_b64);
@@ -171,9 +185,11 @@ export function App() {
           setAppId("");
         }
         if (message.type === "video" && message.action === "play" && message.video_id) {
+          mediaPlaying.current = true;
           pendingVideo.current = message.video_id;
           pendingAudioOnly.current = Boolean(message.audio_only);
           void queue.current.whenIdle().then(() => {
+            if (receivedAttempt !== attemptId.current) return;
             const ready = pendingVideo.current;
             if (!ready) return;
             pendingVideo.current = "";
@@ -184,6 +200,7 @@ export function App() {
           });
         }
         if (message.type === "video" && (message.action === "stop" || message.action === "destroy")) {
+          mediaPlaying.current = false;
           pendingVideo.current = "";
           pendingAudioOnly.current = false;
           setPictureId("");
@@ -194,6 +211,7 @@ export function App() {
           setVideoId("");
         }
         if (message.type === "video" && message.action === "resume") {
+          mediaPlaying.current = true;
           pictureLoadingRef.current = false;
           setPictureLoading(false);
           setPictureId("");
@@ -209,6 +227,7 @@ export function App() {
           if (message.image_id) {
             pendingPicture.current = message.image_id;
             const reveal = () => {
+              if (receivedAttempt !== attemptId.current) return;
               const ready = pendingPicture.current;
               if (!ready) return;
               pendingPicture.current = "";
@@ -236,9 +255,10 @@ export function App() {
         if (message.type === "state" && message.name === "listening") {
           if (listenPausedRef.current) return;
           const finish = () => {
+            if (receivedAttempt !== attemptId.current) return;
             speaking.current = false;
             hands.current = armIfWaiting(hands.current);
-            if (message.detail === "hearing") {
+            if (message.detail === "hearing" || message.detail === "ready") {
               freshListen.current = false;
               setSpokenIndex(-1);
             }
@@ -254,18 +274,31 @@ export function App() {
       ws.onopen = () => {
         ws.send(JSON.stringify({ type: "hello", protocol_major: PROTOCOL_MAJOR, token: body.token }));
         setSocket(ws);
+        socketRef.current = ws;
+        if (phaseRef.current === "talk" && !listenPausedRef.current) {
+          ws.send(JSON.stringify({ type: "talk_start", turn_id: attemptId.current }));
+        }
+      };
+      ws.onclose = ws.onerror = () => {
+        if (!active) return;
+        queue.current.interrupt();
+        speaking.current = false;
+        freshListen.current = true;
+        setStatus("connection-error");
       };
     })();
     return () => {
       active = false;
       opened?.close();
     };
-  }, []);
+  }, [connectionEpoch]);
 
   useEffect(() => {
     if (phase !== "talk" || listenPaused || (videoId && !videoPaused) || appId) return;
     let stop: (() => void) | undefined;
+    let active = true;
     void startMic((pcm, dtMs) => {
+      if (!active || listenPausedRef.current || mediaPlaying.current) return;
       const ws = socketRef.current;
       if (!ws || ws.readyState !== WebSocket.OPEN) return;
       if (voice === "realtime") {
@@ -273,7 +306,7 @@ export function App() {
         ws.send(
           JSON.stringify({
             type: "audio_frame",
-            turn_id: "live",
+            turn_id: attemptId.current,
             seq: seq.current,
             pcm_b64: encodePcm16(pcm),
             sample_rate: 16000,
@@ -319,12 +352,13 @@ export function App() {
       }
     }, capture.current ?? undefined)
       .then((value) => {
-        stop = value;
+        if (active) stop = value;
+        else value();
       })
       .catch(() => {
-        setStatus("mic-error");
+        if (active) setStatus("mic-error");
       });
-    return () => stop?.();
+    return () => { active = false; stop?.(); };
   }, [phase, voice, videoId, videoPaused, listenPaused, appId, micEpoch]);
 
   function send(message: object) {
@@ -332,6 +366,7 @@ export function App() {
   }
 
   function closePlayer(action: "done" | "ended") {
+    mediaPlaying.current = false;
     pictureLoadingRef.current = false;
     setPictureLoading(false);
     setPictureId("");
@@ -350,19 +385,36 @@ export function App() {
     seq.current = 0;
     pendingVideo.current = "";
     pendingPicture.current = "";
+    pictureLoadingRef.current = false;
+    setPictureLoading(false);
+    if (pictureLoading) setPictureId("");
     listenPausedRef.current = false;
     setListenPaused(false);
     setSpokenIndex(-1);
     setStatus("listening");
     setMicEpoch((n) => n + 1);
-    send({ type: "talk_start", turn_id: crypto.randomUUID() });
+    attemptId.current = crypto.randomUUID();
+    if (socketRef.current?.readyState === WebSocket.OPEN) {
+      socketRef.current.send(JSON.stringify({ type: "talk_start", turn_id: attemptId.current }));
+    } else {
+      setConnectionEpoch((n) => n + 1);
+    }
   }
 
   function pauseListen() {
+    queue.current.interrupt();
+    speaking.current = false;
+    freshListen.current = true;
+    pendingVideo.current = "";
+    pendingPicture.current = "";
+    pictureLoadingRef.current = false;
+    setPictureLoading(false);
+    if (pictureLoading) setPictureId("");
+    attemptId.current = crypto.randomUUID();
     listenPausedRef.current = true;
     setListenPaused(true);
     setStatus("paused");
-    send({ type: "talk_start", turn_id: crypto.randomUUID() });
+    send({ type: "talk_stop", turn_id: attemptId.current });
   }
 
   function sendText() {
@@ -565,6 +617,7 @@ export function App() {
           onClose={() => closePlayer("done")}
           onEnded={() => closePlayer("ended")}
           onPausedChange={(paused) => {
+            mediaPlaying.current = !paused;
             setVideoPaused(paused);
             send({ type: "video_ui", action: paused ? "pause" : "resume" });
           }}

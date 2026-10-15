@@ -3,6 +3,16 @@
 
 import { PlaybackQueue, decodePcm16 } from "./playback";
 
+test("a failed audio chunk does not block future speech or keep the queue busy", async () => {
+  const play = vi.fn().mockRejectedValueOnce(new Error("device lost")).mockResolvedValue(undefined);
+  const queue = new PlaybackQueue({ play, stop: () => {} });
+  await queue.enqueue("old", new Int16Array(8), 16000);
+  await queue.enqueue("next", new Int16Array(8), 16000);
+  await queue.whenIdle();
+  expect(play).toHaveBeenCalledTimes(2);
+  expect(queue.isIdle()).toBe(true);
+});
+
 test("playback reports elapsed time against the queued turn", async () => {
   let finish = () => {};
   const playing = new Promise<void>((resolve) => {

@@ -63,6 +63,7 @@ from schoolbookd.voice.pipeline import (
     sentence_audio,
     transcribe_buffer,
 )
+from schoolbookd.voice.realtime import RealtimeSession
 
 LOCALHOSTS = {"127.0.0.1", "::1", "testclient", "localhost"}
 
@@ -111,6 +112,8 @@ class Host:
     openai_api_key: str = ""
     picture_emit: Callable[[dict[str, object]], Awaitable[None]] | None = None
     picture_talk: RealtimeTalk | None = None
+    picture_tasks: set[asyncio.Task[None]] = field(default_factory=set)
+    speech_generation: int = 0
     song_audio: Callable[[str], tuple[bytes, str]] | None = None
     wifi: Wifi | None = None
 
@@ -208,16 +211,21 @@ class Host:
         )
 
         loop = asyncio.get_running_loop()
+        generation = self.speech_generation
 
         def execute(tool: str, args: dict[str, object]) -> dict[str, object]:
+            if generation != self.speech_generation:
+                return {"cancelled": True}
             result = self.runtime.run_tool(self.ensure_live(), tool, args, defer_pictures=True)
             if result.get("loading") and result.get("image_id"):
                 brief = str(result.get("brief") or result.get("topic") or "")
                 kind = str(result.get("kind") or "diagram")
-                loop.create_task(self.complete_picture(brief, str(result["image_id"]), kind))
+                task = loop.create_task(self.complete_picture(brief, str(result["image_id"]), kind))
+                self.picture_tasks.add(task)
+                task.add_done_callback(self.picture_tasks.discard)
             return result
 
-        return RealtimeTalk(
+        talk = RealtimeTalk(
             api_key=self.openai_api_key,
             instructions=instructions,
             execute=execute,
@@ -226,8 +234,17 @@ class Host:
             voice=voice,
             tutor_name=tutor_name,
         )
+        self.picture_talk = talk
+        return talk
+
+    def cancel_speech_work(self) -> None:
+        self.speech_generation += 1
+        self.picture_talk = None
+        for task in self.picture_tasks:
+            task.cancel()
 
     async def complete_picture(self, topic: str, image_id: str, kind: str = "diagram") -> None:
+        generation = self.speech_generation
         try:
             done = await asyncio.to_thread(
                 self.runtime.finish_picture,
@@ -241,6 +258,8 @@ class Host:
             emit = self.picture_emit
             if emit is not None:
                 await emit({"type": "picture", "image_id": image_id, "loading": False, "error": True})
+            return
+        if generation != self.speech_generation:
             return
         talk = self.picture_talk
         if talk is not None:
@@ -419,39 +438,33 @@ def child_app(host: Host) -> FastAPI:
                 "voice": host.voice,
             }
         )
-        talk: RealtimeTalk | None = None
-        pump: asyncio.Task[None] | None = None
+        speech: RealtimeSession | None = None
+        async def emit(message: dict[str, object]) -> None:
+            if speech is not None and message.get("type") == "video":
+                action = message.get("action")
+                if action in {"play", "resume"}:
+                    speech.set_media_playing(True)
+                elif action in {"stop", "destroy", "pause"}:
+                    speech.set_media_playing(False)
+            if message.get("type") == "transcript" and not message.get("partial"):
+                host.note_transcript(str(message.get("role", "tutor")), str(message.get("text", "")))
+            await socket.send_json(message)
+
         if host.voice == "realtime" and host.openai_api_key:
-            talk = host.make_realtime()
+            speech = RealtimeSession(host.make_realtime, emit, host.cancel_speech_work)
 
-            async def emit(message: dict[str, object]) -> None:
-                if message.get("type") == "transcript" and not message.get("partial"):
-                    host.note_transcript(str(message.get("role", "tutor")), str(message.get("text", "")))
-                await socket.send_json(message)
+            async def emit_picture(message: dict[str, object]) -> None:
+                if speech is not None:
+                    await emit({**message, "attempt_id": speech.attempt_id})
 
-            host.picture_emit = emit
-            host.picture_talk = talk
-            try:
-                await talk.start()
-                pump = asyncio.create_task(talk.pump(emit))
-                print("schoolbook: OpenAI Realtime session is live.", file=sys.stderr)
-            except Exception as exc:
-                print(f"schoolbook: OpenAI Realtime failed ({exc}); retrying.", file=sys.stderr)
-                try:
-                    await talk.start()
-                    pump = asyncio.create_task(talk.pump(emit))
-                    print("schoolbook: OpenAI Realtime session is live.", file=sys.stderr)
-                except Exception as retry_exc:
-                    talk = None
-                    print(f"schoolbook: OpenAI Realtime still down ({retry_exc}).", file=sys.stderr)
+            host.picture_emit = emit_picture
         loop = asyncio.get_running_loop()
 
         def app_exited() -> None:
             async def notify() -> None:
                 await socket.send_json({"type": "app", "action": "stop"})
-                if talk is not None:
-                    for message in await talk.reset_listen():
-                        await socket.send_json(message)
+                if speech is not None:
+                    speech.reset(speech.attempt_id)
 
             loop.call_soon_threadsafe(lambda: asyncio.create_task(notify()))
 
@@ -469,20 +482,27 @@ def child_app(host: Host) -> FastAPI:
                     for message in _ws_messages(outcome, incoming.turn_id):
                         await socket.send_json(message)
                 elif incoming.type == "talk_start":
-                    if talk is not None:
-                        for message in await talk.reset_listen():
-                            await socket.send_json(message)
+                    if speech is not None:
+                        speech.reset(incoming.turn_id)
                     elif host.voice != "realtime":
                         host.begin_talk(incoming.turn_id)
                         await socket.send_json({"type": "state", "name": "listening", "detail": ""})
+                elif incoming.type == "talk_stop":
+                    if speech is not None:
+                        speech.reset(incoming.turn_id, listen=False)
+                    host.cancelled_turns.update(host.buffers)
+                    host.buffers.clear()
+                    if host.speaking_turn:
+                        host.cancelled_turns.add(host.speaking_turn)
+                        host.speaking_turn = None
                 elif incoming.type == "audio_frame":
-                    if talk is not None:
+                    if speech is not None:
                         pcm = base64.b64decode(incoming.pcm_b64)
-                        await talk.append_pcm16(pcm, incoming.sample_rate)
+                        speech.audio(pcm, incoming.sample_rate, incoming.turn_id)
                     elif host.voice != "realtime":
                         host.add_audio(incoming.turn_id, incoming.pcm_b64)
                 elif incoming.type == "talk_end":
-                    if talk is not None or host.voice == "realtime":
+                    if host.voice == "realtime":
                         continue
                     turn_id = incoming.turn_id
 
@@ -508,18 +528,19 @@ def child_app(host: Host) -> FastAPI:
                 elif incoming.type == "app_ui":
                     host.runtime.stop_app(host.ensure_live(), notify=False)
                     await socket.send_json({"type": "app", "action": "stop"})
-                    if talk is not None:
-                        for message in await talk.reset_listen():
-                            await socket.send_json(message)
+                    if speech is not None:
+                        speech.reset(speech.attempt_id)
                 elif incoming.type == "video_ui":
                     live = host.ensure_live()
                     if incoming.action in {"done", "ended"}:
                         live.playing_video = None
                         live.screen = "home"
-                    if talk is not None and incoming.action == "pause":
-                        await talk.add_system_note(paused_video_note())
-                    if talk is not None and incoming.action == "ended":
-                        await talk.add_system_note(finished_video_note(), speak=True)
+                    if speech is not None:
+                        speech.set_media_playing(incoming.action == "resume")
+                        if incoming.action == "pause":
+                            speech.note(paused_video_note())
+                        if incoming.action == "ended":
+                            speech.note(finished_video_note(), speak=True)
                     await socket.send_json(
                         {
                             "type": "video",
@@ -534,10 +555,8 @@ def child_app(host: Host) -> FastAPI:
             host.runtime.on_app_exit = None
             host.picture_talk = None
             host.picture_emit = None
-            if pump is not None:
-                pump.cancel()
-            if talk is not None:
-                await talk.close()
+            if speech is not None:
+                await speech.close()
 
     return app
 

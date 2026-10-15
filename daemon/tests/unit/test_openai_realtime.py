@@ -9,11 +9,13 @@ from schoolbookd.providers.openai_realtime import (
     RealtimeMapper,
     RealtimeTalk,
     answer_first_nudge,
+    autogain_pcm16,
     child_speech_decision,
     clarify_speech_note,
     connect_headers,
     extract_child_speech,
     finished_video_note,
+    gain_pcm16,
     game_play_briefing,
     game_topic,
     looks_like_child_speech,
@@ -21,12 +23,10 @@ from schoolbookd.providers.openai_realtime import (
     looks_like_fantasy,
     maybe_song_topic,
     paused_video_note,
+    pcm16_rms,
     picture_making_line,
     picture_request_briefing,
     picture_wait_instructions,
-    pcm16_rms,
-    gain_pcm16,
-    autogain_pcm16,
     real_world_nudge,
     resample_pcm16,
     session_update,
@@ -135,6 +135,52 @@ def test_function_call_runs_the_schoolbook_tool() -> None:
     assert outbound[1]["type"] == "response.create"
 
 
+def test_two_completion_events_for_one_tool_execute_only_once() -> None:
+    calls: list[str] = []
+
+    def execute(name: str, args: dict[str, object]) -> dict[str, object]:
+        calls.append(name)
+        return {"shown": True}
+
+    mapper = RealtimeMapper()
+    call = {"name": "show_board", "call_id": "same", "arguments": '{"elements":[]}'}
+    mapper.handle({"type": "response.function_call_arguments.done", **call}, execute=execute)
+    assert mapper.handle(
+        {"type": "response.output_item.done", "item": {"type": "function_call", **call}}, execute=execute
+    ) == ([], [])
+    assert calls == ["show_board"]
+
+
+def test_followup_response_waits_for_the_active_response_to_finish() -> None:
+    from test_realtime_session import Socket, settle
+
+    async def run() -> None:
+        socket = Socket()
+
+        async def connect(_key: str) -> Socket:
+            return socket
+
+        async def emit(event: dict[str, object]) -> None:
+            pass
+
+        talk = RealtimeTalk("unused", "help", lambda n, a: {}, connect)
+        await talk.start()
+        pump = asyncio.create_task(talk.pump(emit))
+        socket.event({"type": "response.created"})
+        socket.event({"type": "response.function_call_arguments.done", "name": "show_board",
+                      "call_id": "one", "arguments": "{}"})
+        await settle()
+        assert not any(e["type"] == "response.create" for e in socket.sent)
+        socket.event({"type": "response.done"})
+        await settle()
+        assert sum(e["type"] == "response.create" for e in socket.sent) == 1
+        pump.cancel()
+        await asyncio.gather(pump, return_exceptions=True)
+        await talk.close()
+
+    asyncio.run(run())
+
+
 def test_child_transcript_waits_until_the_agent_heard_the_sentence() -> None:
     mapper = RealtimeMapper()
     first, outbound = mapper.handle(
@@ -177,7 +223,9 @@ def test_child_transcript_is_forwarded() -> None:
     assert ui[0]["role"] == "child"
     assert ui[0]["text"] == "hello"
     assert outbound[-1]["type"] == "response.create"
-    assert all(item.get("type") != "conversation.item.create" for item in outbound)
+    assert outbound[0]["item"] == {
+        "type": "message", "role": "user", "content": [{"type": "input_text", "text": "hello"}],
+    }
 
 
 def test_video_watch_briefing_asks_for_history_or_science() -> None:
@@ -306,7 +354,10 @@ def test_video_request_sends_an_educational_briefing_to_the_model() -> None:
     )
     assert ui[0]["text"] == "Show me some dinosaur videos."
     assert outbound[0]["type"] == "conversation.item.create"
-    briefing = str(outbound[0]["item"]["content"][0]["text"])
+    briefing = " ".join(
+        str(item["item"]["content"][0]["text"]) for item in outbound
+        if item.get("type") == "conversation.item.create" and item["item"].get("role") == "system"
+    )
     assert "six-year-old" in briefing.lower()
     assert "dinosaur" in briefing.lower()
     assert "educational" in briefing.lower()
@@ -453,7 +504,10 @@ def test_fantasy_talk_gets_a_gentle_nudge_toward_real_things() -> None:
             "transcript": "Tell me about Elsa.",
         }
     )
-    briefing = str(outbound[0]["item"]["content"][0]["text"])
+    briefing = " ".join(
+        str(item["item"]["content"][0]["text"]) for item in outbound
+        if item.get("type") == "conversation.item.create" and item["item"].get("role") == "system"
+    )
     assert "real" in briefing.lower()
     assert outbound[-1]["type"] == "response.create"
 
@@ -552,14 +606,12 @@ def test_unclear_transcript_asks_the_child_to_confirm() -> None:
     )
     roles = [str(message.get("role")) for message in ui]
     assert "child" in roles
-    assert "tutor" in roles
-    tutor = next(message for message in ui if message.get("role") == "tutor")
-    assert "asdfkj fff" in str(tutor["text"]).lower()
-    assert "sounded like" in str(tutor["text"]).lower()
+    assert "tutor" not in roles  # Show only the transcript of audio actually generated.
+    assert ui[0]["text"] == "asdfkj mmm fff"
     create = outbound[-1]
     assert create["type"] == "response.create"
     spoken = json.dumps(create).lower()
-    assert "asdfkj fff" in spoken
+    assert "asdfkj mmm fff" in spoken
     assert "out loud" in spoken or "speak" in spoken
 
 
@@ -1069,3 +1121,81 @@ def test_resample_stretches_16k_pcm_to_24k() -> None:
     out = resample_pcm16(pcm, 16000, 24000)
     assert len(out) == 6
     assert resample_pcm16(pcm, 16000, 16000) == pcm
+
+
+def test_scishow_request_uses_the_displayed_words_as_model_input() -> None:
+    text = "I want to watch a show about snakes on SciShow Kids."
+    mapper = RealtimeMapper()
+    event = {"type": "conversation.item.input_audio_transcription.completed",
+             "item_id": "audio_snakes", "transcript": text}
+    ui, outbound = mapper.handle(event)
+    assert ui == [{"type": "transcript", "turn_id": mapper.turn_id,
+                   "role": "child", "text": text, "partial": False}]
+    assert outbound[0] == {"type": "conversation.item.delete", "item_id": "audio_snakes"}
+    assert outbound[1] == {
+        "type": "conversation.item.create",
+        "item": {"type": "message", "role": "user", "content": [{"type": "input_text", "text": text}]},
+    }
+    assert outbound[-1] == {"type": "response.create"}
+    briefing = video_watch_briefing(text)
+    assert briefing and "snakes on SciShow Kids" in briefing
+    assert "requested channel" in briefing
+    assert not any("sounded like" in json.dumps(item).lower() for item in outbound)
+    assert mapper.handle(event) == ([], [])  # Duplicate final event cannot prompt a second reply.
+
+
+def test_transcript_keeps_meaningful_words_numbers_and_names() -> None:
+    text = "I like SciShow Kids' videos about 12-foot snakes!"
+    mapper = RealtimeMapper()
+    ui, outbound = mapper.handle({"type": "conversation.item.input_audio_transcription.completed",
+                                 "item_id": "audio_12", "transcript": text})
+    assert ui[0]["text"] == text
+    assert outbound[1]["item"]["content"][0]["text"] == text
+
+
+def test_ignored_and_failed_audio_cannot_influence_the_next_reply() -> None:
+    for transcript in ("", "um"):
+        mapper = RealtimeMapper()
+        _, outbound = mapper.handle({"type": "conversation.item.input_audio_transcription.completed",
+                                     "item_id": "noise", "transcript": transcript})
+        assert outbound[0] == {"type": "conversation.item.delete", "item_id": "noise"}
+        assert not any(item["type"] == "response.create" for item in outbound)
+    mapper = RealtimeMapper()
+    ui, outbound = mapper.handle({"type": "conversation.item.input_audio_transcription.failed",
+                                 "item_id": "failed"})
+    assert ui[0]["type"] == "error"
+    assert outbound == [{"type": "conversation.item.delete", "item_id": "failed"}]
+    mapper.reset_listen()
+    assert mapper.handle({"type": "conversation.item.input_audio_transcription.completed",
+                          "item_id": "cancelled", "transcript": "wrong turn"}) == (
+        [], [{"type": "conversation.item.delete", "item_id": "cancelled"}],
+    )
+
+
+def test_socket_replaces_audio_before_requesting_a_spoken_reply() -> None:
+    from test_realtime_session import Socket, settle
+
+    async def run() -> None:
+        socket = Socket()
+        async def connect(_key: str) -> Socket:
+            return socket
+        async def emit(_event: dict[str, object]) -> None:
+            pass
+        talk = RealtimeTalk("unused", "help", lambda n, a: {}, connect)
+        await talk.start()
+        socket.sent.clear()
+        worker = asyncio.create_task(talk.pump(emit))
+        socket.event({
+            "type": "conversation.item.input_audio_transcription.completed",
+            "item_id": "audio_snakes",
+            "transcript": "I want to watch a show about snakes on SciShow Kids",
+        })
+        await settle()
+        assert socket.sent[0] == {"type": "conversation.item.delete", "item_id": "audio_snakes"}
+        assert socket.sent[1]["item"]["role"] == "user"
+        assert socket.sent[1]["item"]["content"][0]["text"].endswith("SciShow Kids")
+        assert socket.sent[-1] == {"type": "response.create"}
+        worker.cancel()
+        await asyncio.gather(worker, return_exceptions=True)
+        await talk.close()
+    asyncio.run(run())

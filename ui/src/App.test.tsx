@@ -64,6 +64,28 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
+test("late microphone setup is stopped and old replies are ignored after Stop", async () => {
+  let resolveMic: (stop: () => void) => void = () => {};
+  const stop = vi.fn();
+  vi.mocked(startMic).mockImplementation(() => new Promise((resolve) => { resolveMic = resolve; }));
+  render(<App />);
+  await vi.waitFor(() => expect(sockets.length).toBe(1));
+  const socket = sockets[0];
+  fireEvent.click(screen.getByRole("button", { name: "friend" }));
+  await vi.waitFor(() => expect(startMic).toHaveBeenCalled());
+  const first = socket.send.mock.calls.map(([raw]) => JSON.parse(String(raw))).find((m) => m.type === "talk_start");
+  fireEvent.click(screen.getByRole("button", { name: "stop" }));
+  await act(async () => { resolveMic(stop); });
+  expect(stop).toHaveBeenCalledOnce();
+  act(() => {
+    socket.onmessage?.({ data: JSON.stringify({
+      type: "transcript", role: "tutor", text: "Old answer", attempt_id: first.turn_id,
+    }) } as MessageEvent);
+  });
+  expect(screen.queryByText("Old answer")).toBeNull();
+  expect(screen.getByRole("img", { name: "paused" })).toBeTruthy();
+});
+
 test("battery appears on home and talk screens, hides for video, and returns after closing", async () => {
   vi.stubGlobal("fetch", vi.fn(async (url: string) => ({
     ok: true,
@@ -225,7 +247,7 @@ test("a blocked microphone is shown after the avatar tap", async () => {
   expect(await screen.findByRole("status", { name: "I cannot hear the microphone" })).toBeTruthy();
 });
 
-test("playing a video stops mic frames until the child closes it", async () => {
+test.each([false, true])("playing media (audio only: %s) mutes input until paused or closed", async (audioOnly) => {
   const listeners: Array<(pcm: Int16Array, dtMs: number) => void> = [];
   vi.mocked(startMic).mockImplementation(async (onFrame) => {
     listeners.push(onFrame);
@@ -251,10 +273,10 @@ test("playing a video stops mic frames until the child closes it", async () => {
   socket.send.mockClear();
   act(() => {
     socket.onmessage?.({
-      data: JSON.stringify({ type: "video", action: "play", video_id: "abcdefghijk" }),
+      data: JSON.stringify({ type: "video", action: "play", video_id: "abcdefghijk", audio_only: audioOnly }),
     } as MessageEvent);
   });
-  expect(await screen.findByTitle("video")).toBeTruthy();
+  expect(await screen.findByRole("region", { name: audioOnly ? "song" : "video" })).toBeTruthy();
   await vi.waitFor(() => expect(listeners.length).toBe(0));
   fireEvent.click(screen.getByLabelText("pause or play"));
   await vi.waitFor(() => expect(listeners.length).toBe(1));
@@ -565,6 +587,7 @@ test("the stop button pauses listening until the microphone starts it again", as
   });
   expect(socket.send.mock.calls.some((call) => String(call[0]).includes("audio_frame"))).toBe(true);
   fireEvent.click(screen.getByRole("button", { name: "stop" }));
+  expect(socket.send.mock.calls.some(([raw]) => JSON.parse(String(raw)).type === "talk_stop")).toBe(true);
   expect(screen.queryByText("Paused")).toBeNull();
   const paused = screen.getByRole("img", { name: "paused" });
   expect(paused.className).toContain("pause-mark");

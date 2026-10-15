@@ -36,6 +36,11 @@ class TalkEnd(BaseModel):
     turn_id: str
 
 
+class TalkStop(BaseModel):
+    type: Literal["talk_stop"] = "talk_stop"
+    turn_id: str
+
+
 class DevText(BaseModel):
     type: Literal["dev_text"] = "dev_text"
     turn_id: str
@@ -82,6 +87,7 @@ ClientMessage = Annotated[
     | AudioFrame
     | TalkStart
     | TalkEnd
+    | TalkStop
     | DevText
     | ChoiceSelected
     | BoardTap

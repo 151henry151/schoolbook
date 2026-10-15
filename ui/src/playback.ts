@@ -56,10 +56,14 @@ export class PlaybackQueue {
         try {
           this.progress?.(this.playedMs, this.queuedMs);
           await this.player.play(turnId, pcm, sampleRate);
+        } catch {
+          // A device/playback error must not poison every later chunk or keep the mic muted.
         } finally {
           globalThis.clearInterval(tick);
-          this.playedMs += chunkMs;
-          this.progress?.(this.playedMs, this.queuedMs);
+          if (epoch === this.epoch) {
+            this.playedMs += chunkMs;
+            this.progress?.(this.playedMs, this.queuedMs);
+          }
         }
       } finally {
         if (epoch === this.epoch) this.pending = Math.max(0, this.pending - 1);
@@ -87,29 +91,40 @@ export class PlaybackQueue {
 export function webAudioPlayer(): AudioPlayer {
   let context: AudioContext | null = null;
   let current: AudioBufferSourceNode | null = null;
+  let epoch = 0;
+  let finish: (() => void) | null = null;
   return {
     async play(_turnId: string, pcm: Int16Array, sampleRate: number) {
       context ??= new AudioContext();
-      await context.resume();
-      const buffer = context.createBuffer(1, Math.max(pcm.length, 1), sampleRate);
+      const audio = context;
+      const started = epoch;
+      await audio.resume();
+      if (started !== epoch) return;
+      const buffer = audio.createBuffer(1, Math.max(pcm.length, 1), sampleRate);
       const data = buffer.getChannelData(0);
       for (let index = 0; index < pcm.length; index += 1) data[index] = pcm[index] / 32768;
-      const source = context.createBufferSource();
+      const source = audio.createBufferSource();
       source.buffer = buffer;
-      source.connect(context.destination);
+      source.connect(audio.destination);
       current = source;
       await new Promise<void>((resolve) => {
+        finish = resolve;
         source.onended = () => resolve();
         source.start();
       });
     },
     stop() {
+      epoch += 1;
       try {
         current?.stop();
       } catch {
         /* already stopped */
       }
       current = null;
+      finish?.();
+      finish = null;
+      if (context?.close) void context.close().catch(() => {});
+      context = null;
       if (typeof speechSynthesis !== "undefined") speechSynthesis.cancel();
     },
   };

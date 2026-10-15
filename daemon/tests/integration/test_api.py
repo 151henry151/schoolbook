@@ -3,6 +3,7 @@
 
 from pathlib import Path
 
+import pytest
 from fastapi.testclient import TestClient
 
 from schoolbookd.api import Host, child_app, console_app
@@ -69,6 +70,63 @@ def test_battery_endpoint_is_uncached_and_local_only(tmp_path: Path, monkeypatch
     assert response.json() == {"percent": 82, "charging": True}
     assert response.headers["cache-control"] == "no-store"
     assert TestClient(app, client=("203.0.113.1", 1234)).get("/battery").status_code == 403
+
+
+def test_child_controls_replace_stuck_speech_and_stop_without_reopening(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import asyncio
+    import threading
+
+    from schoolbookd.providers.openai_realtime import RealtimeTalk
+
+    class Talk(RealtimeTalk):
+        def __init__(self, stuck: bool) -> None:
+            super().__init__("unused", "help", lambda n, a: {})
+            self.stuck = stuck
+            self.started = threading.Event()
+            self.closed = threading.Event()
+
+        async def start(self) -> None:
+            self.started.set()
+            if self.stuck:
+                await asyncio.Event().wait()
+
+        async def pump(self, emit: object) -> None:
+            await asyncio.Event().wait()
+
+        async def close(self) -> None:
+            self.closed.set()
+
+    talks = [Talk(True), Talk(False)]
+    calls: list[Talk] = []
+
+    def factory(host: Host) -> Talk:
+        talk = talks[len(calls)]
+        calls.append(talk)
+        return talk
+
+    monkeypatch.setattr(Host, "make_realtime", factory)
+    host = _host(tmp_path)
+    host.voice = "realtime"
+    host.openai_api_key = "unused"
+    with TestClient(child_app(host)).websocket_connect("/ws") as socket:
+        socket.send_json({"type": "hello", "protocol_major": 1, "token": "boot-token"})
+        assert socket.receive_json()["type"] == "hello_ok"
+        socket.send_json({"type": "talk_start", "turn_id": "stuck"})
+        assert talks[0].started.wait(1)
+        socket.send_json({"type": "ping"})
+        assert socket.receive_json()["type"] == "pong"
+        socket.send_json({"type": "talk_start", "turn_id": "fresh"})
+        assert socket.receive_json() == {
+            "type": "state", "name": "listening", "detail": "ready", "attempt_id": "fresh",
+        }
+        assert talks[0].closed.wait(1)
+        socket.send_json({"type": "talk_stop", "turn_id": "stop"})
+        socket.send_json({"type": "ping"})
+        assert socket.receive_json()["type"] == "pong"
+        assert talks[1].closed.wait(1)
+        assert len(calls) == 2
 
 
 def test_dev_turn_and_console_lockout(tmp_path: Path) -> None:

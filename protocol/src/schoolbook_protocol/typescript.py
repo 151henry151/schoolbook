@@ -34,6 +34,7 @@ _LINES = [
     "      pcm_b64: string; sample_rate: number }",
     '  | { type: "talk_start"; turn_id: string }',
     '  | { type: "talk_end"; turn_id: string }',
+    '  | { type: "talk_stop"; turn_id: string }',
     '  | { type: "dev_text"; turn_id: string; text: string }',
     '  | { type: "choice"; turn_id: string; option_id: string }',
     '  | { type: "board_tap"; turn_id: string;',
