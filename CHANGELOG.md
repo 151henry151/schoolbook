@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.10.0] - 2026-10-15
+
 ### Fixed
 
 - Display parent-console session timestamps in Eastern time, with EST/EDT labels and correct handling of UTC timestamps from SQLite.
@@ -16,7 +18,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Process each Realtime tool call once and wait for the active response to finish before requesting the next reply.
 - Recover the audio queue after a playback error instead of blocking later replies and microphone input.
 - Ignore queued microphone input and speech recognition events during song or video playback.
-
 
 ### Added
 
@@ -66,6 +67,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- Update the shared protocol package to 1.1.0 for speech cancellation and song playback notifications; the wire protocol remains compatible with major version 1.
 - Hold the child's next turn until the tutor finishes speaking
 - Change the default learner first name from Sam to Arum
 - Resume capture audio from the avatar tap, fall back if AudioWorklet fails, and show a microphone error

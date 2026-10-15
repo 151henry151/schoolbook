@@ -2,13 +2,13 @@
 
 Schoolbook is a locked-down Linux learning environment for one child. The machine boots into a kiosk. The child talks with a tutor, sees a full-screen board, watches vetted videos, and can open a short list of educational apps. A parent console on a separate port shows what happened.
 
-Version 0.9.0 is the software described through phase 8 of [docs/design-spec.md](docs/design-spec.md). Version 1.0.0 waits for a real pilot with a parent nearby. `schoolbook` starts a cage kiosk for the current session. It does not replace the machine's login manager; `packaging/install.sh` is the path that boots straight into Schoolbook.
+Version 0.10.0 adds CF-30 recovery controls, reliable speech resets, familiar-song playback, and a mobile parent console to the software described in [docs/design-spec.md](docs/design-spec.md). Version 1.0.0 waits for a real pilot with a parent nearby. `schoolbook` starts a cage kiosk for the current session. It does not replace the machine's login manager; `packaging/install.sh` is the path that boots straight into Schoolbook.
 
 ## Layout
 
 - `daemon/` — `schoolbookd`, the tutor, database, and HTTP API
 - `session/` — `schoolbook-session`, the allowlisted app launcher
-- `protocol/` — shared message models, protocol major 1
+- `protocol/` — shared message models, package 1.1.0 / wire protocol major 1
 - `ui/` — the child's screen
 - `console/` — the parent console
 - `prompts/`, `profiles/`, `skills/`, `apps.d/` — shipped content
@@ -51,17 +51,17 @@ After the avatar tap, the microphone stays on. Speak, pause, and the tutor answe
 
 ## CF-30 kiosk controls
 
-In the CF-30's systemd-managed X11/Openbox kiosk, **F11 restarts Schoolbook**, including the tutor backend, browser, audio session, and any open game. The current conversation is interrupted, but the laptop does not reboot and saved learner data remains. The key is handled by Openbox, so it can recover a frozen browser. It requires the root-run `schoolbook-kiosk.service` and `packaging/xinitrc`; it is not a shortcut in ordinary desktop or Cage sessions. An OS or X server freeze still needs separate recovery.
-
-For an existing CF-30 installation, update the application and rebuild `ui/`, including `packaging/openbox/rc.xml`. Install the updated `packaging/systemd/schoolbook-kiosk.service` in `/etc/systemd/system/` and run `systemctl daemon-reload` as root; its ten-second stop timeout bounds recovery from stuck processes. The Openbox binding takes effect on the next kiosk start. Arrange that restart for a break in use; avoid restarting the kiosk while a child is using it.
-
-The main screen shows the laptop's battery percentage at the top left, with a lightning bolt while charging and a red indicator at 20% or below when discharging. It refreshes every 30 seconds and is hidden while a video, song player, or game is open. Machines without readable battery information show no indicator.
-
 Tap the **microphone** to cancel the current speech attempt and start a fresh connection. Tap the **stop sign** to cancel the attempt and immediately silence the tutor; listening stays paused until the microphone is tapped again. A fresh connection clears the live AI conversation context, while saved learner data and transcripts remain. Connection setup and network waits do not block these controls. A disconnected browser can reconnect on the next microphone tap.
 
 For each speech turn, the finalized transcription shown on screen replaces the corresponding audio message in the tutor’s conversation before a reply is requested. This gives the tutor the same words the parent sees, rather than a separate interpretation of the audio. Names, numbers, and meaningful words are preserved. Unrecognized audio is discarded; a transcription failure shows a recoverable microphone error. Spoken replies still use OpenAI Realtime audio.
 
 While a song or video is playing, microphone capture is stopped and the backend ignores speech input, so talking cannot interrupt playback. Pause or close the player to talk to the tutor again.
+
+The main screen shows the laptop's battery percentage at the top left, with a lightning bolt while charging and a red indicator at 20% or below when discharging. It refreshes every 30 seconds and is hidden while a video, song player, or game is open. Machines without readable battery information show no indicator.
+
+In the CF-30's systemd-managed X11/Openbox kiosk, **F11 restarts Schoolbook**, including the tutor backend, browser, audio session, and any open game. The current conversation is interrupted, but the laptop does not reboot and saved learner data remains. The key is handled by Openbox, so it can recover a frozen browser. It requires the root-run `schoolbook-kiosk.service` and `packaging/xinitrc`; it is not a shortcut in ordinary desktop or Cage sessions. An OS or X server freeze still needs separate recovery.
+
+For an existing CF-30 installation, update the application and rebuild `ui/`, including `packaging/openbox/rc.xml`. Install the updated `packaging/systemd/schoolbook-kiosk.service` in `/etc/systemd/system/` and run `systemctl daemon-reload` as root; its ten-second stop timeout bounds recovery from stuck processes. The Openbox binding takes effect on the next kiosk start. Arrange that restart for a break in use; avoid restarting the kiosk while a child is using it.
 
 ## Music controls and familiar songs
 
