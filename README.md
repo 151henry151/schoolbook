@@ -55,6 +55,8 @@ In the CF-30's systemd-managed X11/Openbox kiosk, **F11 restarts Schoolbook**, i
 
 For an existing CF-30 installation, update the application and rebuild `ui/`, including `packaging/openbox/rc.xml`. Install the updated `packaging/systemd/schoolbook-kiosk.service` in `/etc/systemd/system/` and run `systemctl daemon-reload` as root; its ten-second stop timeout bounds recovery from stuck processes. The Openbox binding takes effect on the next kiosk start. Arrange that restart for a break in use; avoid restarting the kiosk while a child is using it.
 
+The main screen shows the laptop's battery percentage at the top left, with a lightning bolt while charging and a red indicator at 20% or below when discharging. It refreshes every 30 seconds and is hidden while a video, song player, or game is open. Machines without readable battery information show no indicator.
+
 ## License
 
 GPL-3.0-or-later. See [LICENSE](LICENSE) and [NOTICE](NOTICE).

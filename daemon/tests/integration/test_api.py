@@ -62,6 +62,15 @@ def _host(tmp_path: Path) -> Host:
     )
 
 
+def test_battery_endpoint_is_uncached_and_local_only(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr("schoolbookd.api.battery_status", lambda: {"percent": 82, "charging": True})
+    app = child_app(_host(tmp_path))
+    response = TestClient(app).get("/battery")
+    assert response.json() == {"percent": 82, "charging": True}
+    assert response.headers["cache-control"] == "no-store"
+    assert TestClient(app, client=("203.0.113.1", 1234)).get("/battery").status_code == 403
+
+
 def test_dev_turn_and_console_lockout(tmp_path: Path) -> None:
     host = _host(tmp_path)
     child = TestClient(child_app(host))

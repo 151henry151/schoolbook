@@ -64,6 +64,25 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
+test("battery appears on home and talk screens, hides for video, and returns after closing", async () => {
+  vi.stubGlobal("fetch", vi.fn(async (url: string) => ({
+    ok: true,
+    json: async () => url === "/battery" ? { percent: 82, charging: true } : { token: "boot" },
+  })));
+  render(<App />);
+  expect(await screen.findByRole("img", { name: "Battery 82%, charging" })).toBeTruthy();
+  await vi.waitFor(() => expect(sockets.length).toBe(1));
+  fireEvent.click(screen.getByRole("button", { name: "friend" }));
+  expect(await screen.findByRole("img", { name: "Battery 82%, charging" })).toBeTruthy();
+  await act(async () => {
+    sockets[0].onmessage?.({ data: JSON.stringify({ type: "video", action: "play", video_id: "abc" }) } as MessageEvent);
+  });
+  expect(screen.getByTitle("video")).toBeTruthy();
+  expect(screen.queryByRole("img", { name: /Battery/ })).toBeNull();
+  fireEvent.click(screen.getByRole("button", { name: "close video" }));
+  expect(await screen.findByRole("img", { name: "Battery 82%, charging" })).toBeTruthy();
+});
+
 test("child and tutor lines stay on screen together", async () => {
   render(<App />);
   await vi.waitFor(() => expect(sockets.length).toBe(1));

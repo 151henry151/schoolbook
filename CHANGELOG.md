@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Show battery percentage, a charging symbol, and a low-battery color on the main screen; hide the indicator during videos and games.
 - Let F11 restart the complete CF-30 kiosk session through Openbox, even when Chromium stops responding, without rebooting the laptop.
 - OpenAI Realtime speech-to-speech live talk when `OPENAI_API_KEY` is set
 - Connect to the GA Realtime API without the retired beta header

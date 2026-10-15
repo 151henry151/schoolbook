@@ -3,6 +3,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { Board } from "./board";
+import { BatteryIndicator } from "./battery";
 import { HOLD_MS, OFFLINE_APPS, holdComplete } from "./capture";
 import { armed, armIfWaiting, stepHandsFree, type HandsFreeState } from "./handsfree";
 import { createCaptureContext, startMic } from "./mic";
@@ -382,6 +383,7 @@ export function App() {
   if (phase === "home") {
     return (
       <main className="home">
+        <BatteryIndicator />
         {offline ? <WifiSetup token={token} /> : null}
         <button
           type="button"
@@ -409,6 +411,7 @@ export function App() {
 
   return (
     <main className="talk">
+      {!videoId && !appId ? <BatteryIndicator /> : null}
       <button
         type="button"
         className={videoId || appId ? "hold-corner hold-left" : "hold-corner"}

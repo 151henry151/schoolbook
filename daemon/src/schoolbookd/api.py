@@ -25,6 +25,7 @@ from starlette.responses import Response as StarletteResponse
 from schoolbook_protocol.messages import parse_client_message
 from schoolbook_protocol.version import MAJOR
 from schoolbookd.backup import restic_backup_command
+from schoolbookd.battery import battery_status
 from schoolbookd.db.models import (
     ContentRequest,
     Flag,
@@ -278,6 +279,10 @@ def child_app(host: Host) -> FastAPI:
     @app.get("/health")
     def health() -> dict[str, str]:
         return {"status": "ok"}
+
+    @app.get("/battery")
+    def battery() -> JSONResponse:
+        return JSONResponse(battery_status(), headers={"Cache-Control": "no-store"})
 
     def _wifi() -> Wifi:
         return host.wifi if host.wifi is not None else Wifi()
