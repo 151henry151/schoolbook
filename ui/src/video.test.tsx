@@ -149,3 +149,21 @@ test("playerCommand posts a YouTube iframe command", () => {
     "https://www.youtube-nocookie.com",
   );
 });
+
+test("the song has a visible keyboard-accessible pause and play button", () => {
+  const play = vi.spyOn(HTMLMediaElement.prototype, "play").mockResolvedValue();
+  const pause = vi.spyOn(HTMLMediaElement.prototype, "pause").mockImplementation(() => {});
+  const changed = vi.fn();
+  const started = vi.fn();
+  render(<VideoOverlay videoId="songid11111" audioOnly onClose={() => {}} onPausedChange={changed} onPlaying={started} />);
+  fireEvent.playing(document.querySelector("audio")!);
+  expect(started).toHaveBeenCalledOnce();
+  fireEvent.click(screen.getByRole("button", { name: "Pause music" }));
+  expect(pause).toHaveBeenCalled();
+  expect(changed).toHaveBeenLastCalledWith(true);
+  fireEvent.click(screen.getByRole("button", { name: "Play music" }));
+  expect(play).toHaveBeenCalled();
+  expect(changed).toHaveBeenLastCalledWith(false);
+  expect(screen.getByLabelText("song").className).not.toContain("cursor-idle");
+  play.mockRestore(); pause.mockRestore();
+});

@@ -63,6 +63,12 @@ For each speech turn, the finalized transcription shown on screen replaces the c
 
 While a song or video is playing, microphone capture is stopped and the backend ignores speech input, so talking cannot interrupt playback. Pause or close the player to talk to the tutor again.
 
+## Music controls and familiar songs
+
+The child’s song screen has a large **pause/play** button. Pausing allows speech again; resuming stops microphone capture. Closing a song cancels the remaining queue.
+
+Schoolbook records a song after its audio actually starts, once per play (pausing/resuming does not count twice). History is saved per learner in SQLite and survives restarts. Requests such as “I want to hear some music” use `play_music` to shuffle previously heard, still-approved songs and play each once. Naming a song keeps the existing search-and-play behavior. If there is no history yet, the tutor asks which song to play. History begins with this update; old video play counts cannot reliably distinguish songs. Parent blocks are rechecked before each queued track. Migration `0002` adds `song_plays` without changing existing learner records.
+
 ## License
 
 GPL-3.0-or-later. See [LICENSE](LICENSE) and [NOTICE](NOTICE).

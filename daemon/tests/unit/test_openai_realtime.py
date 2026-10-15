@@ -1123,6 +1123,19 @@ def test_resample_stretches_16k_pcm_to_24k() -> None:
     assert resample_pcm16(pcm, 16000, 16000) == pcm
 
 
+def test_general_music_requests_use_familiar_songs() -> None:
+    from schoolbookd.providers.openai_realtime import familiar_music_request, song_listen_briefing
+
+    for text in (
+        "I want to hear some music", "play some music",
+        "Can you play me some songs?", "I wanna listen to music",
+    ):
+        assert familiar_music_request(text)
+        assert "play_music" in (song_listen_briefing(text) or "")
+    for text in ("play the song Thunderstruck", "play a music game", "why is music loud?"):
+        assert not familiar_music_request(text)
+
+
 def test_scishow_request_uses_the_displayed_words_as_model_input() -> None:
     text = "I want to watch a show about snakes on SciShow Kids."
     mapper = RealtimeMapper()

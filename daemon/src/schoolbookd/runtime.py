@@ -40,6 +40,9 @@ class LiveState:
     history: list[dict[str, object]] = field(default_factory=list)
     observations: list[str] = field(default_factory=list)
     playing_video: str | None = None
+    playing_audio_only: bool = False
+    song_recorded: bool = False
+    song_queue: list[str] = field(default_factory=list)
     app_pid: int | None = None
     paused: bool = False
     screen: str = "home"
@@ -421,7 +424,22 @@ class Runtime:
         if name == "get_skill_status":
             profile = self.store.profile_input(live.learner_id)
             return {"practicing": profile.practicing, "review_due": profile.review_due}
+        if name == "play_music":
+            songs = self.store.familiar_songs(live.learner_id)
+            if not songs:
+                return {"empty": True, "message": "No familiar songs yet. Ask which song to play."}
+            import random
+
+            random.shuffle(songs)
+            first, *remaining = songs
+            result = self.run_tool(live, "play_video", {"video_id": first, "audio_only": True})
+            if "error" not in result:
+                live.song_queue = remaining
+            return result
         if name == "play_video":
+            live.song_queue.clear()
+            live.song_recorded = False
+            live.playing_audio_only = bool(args.get("audio_only"))
             live.playing_video = str(args["video_id"])
             live.screen = "video"
             video = self.store.video(live.playing_video)
@@ -438,6 +456,7 @@ class Runtime:
             if action == "pause":
                 live.last_video_pause_at = live.now_s
             if action == "stop":
+                live.song_queue.clear()
                 live.playing_video = None
                 live.screen = "home"
             return {"action": action, "deferred": False}
@@ -467,6 +486,20 @@ class Runtime:
                 return {"verdict": "unknown"}
             return self.catalog.vet(str(args["video_id"]))
         return {"error": "not implemented"}
+
+    def song_started(self, live: LiveState, video_id: str) -> None:
+        if live.playing_audio_only and live.playing_video == video_id and not live.song_recorded:
+            self.store.record_song_play(live.learner_id, video_id)
+            live.song_recorded = True
+
+    def next_song(self, live: LiveState) -> dict[str, object] | None:
+        while live.song_queue:
+            video_id, *remaining = live.song_queue
+            result = self.run_tool(live, "play_video", {"video_id": video_id, "audio_only": True})
+            live.song_queue = remaining
+            if "error" not in result:
+                return result
+        return None
 
     def _cap_reached(self, app_id: str) -> bool:
         caps = self.store.get_setting("app_caps", {})

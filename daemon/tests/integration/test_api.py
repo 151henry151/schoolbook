@@ -314,3 +314,28 @@ def test_child_lists_and_joins_wifi(tmp_path: Path) -> None:
     )
     assert joined.status_code == 200
     assert joined.json()["ok"] is True
+
+
+def test_familiar_song_queue_advances_and_close_cancels_it(tmp_path: Path) -> None:
+    host = _host(tmp_path)
+    live = host.ensure_live()
+    for video_id in ("songid11111", "songid22222"):
+        host.runtime.approve_video(video_id, video_id, "music", 1)
+        host.runtime.store.record_song_play("kid", video_id)
+    first = host.runtime.run_tool(live, "play_music", {})
+    with TestClient(child_app(host)).websocket_connect("/ws") as socket:
+        socket.send_json({"type": "hello", "protocol_major": 1, "token": "boot-token"})
+        assert socket.receive_json()["type"] == "hello_ok"
+        socket.send_json({"type": "video_ui", "action": "playing", "video_id": first["playing"]})
+        socket.send_json({"type": "video_ui", "action": "ended", "video_id": first["playing"]})
+        next_track = socket.receive_json()
+        assert next_track["action"] == "play"
+        assert next_track["audio_only"] is True
+        assert next_track["video_id"] != first["playing"]
+        socket.send_json({"type": "video_ui", "action": "ended", "video_id": first["playing"]})
+        socket.send_json({"type": "ping"})
+        assert socket.receive_json() == {"type": "pong"}  # Old player cannot end the new song.
+        socket.send_json({"type": "video_ui", "action": "done", "video_id": next_track["video_id"]})
+        assert socket.receive_json()["action"] == "stop"
+        assert live.playing_video is None
+        assert live.song_queue == []

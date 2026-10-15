@@ -41,6 +41,7 @@ _KNOWN = {
     "ask_choice",
     "search_videos",
     "play_video",
+    "play_music",
     "vet_video",
     "video_control",
     "show_picture",
@@ -107,6 +108,9 @@ class ToolPolicy:
         kind = args.get("kind", "video")
         if kind not in {"video", "song"}:
             return Decision(False, "kind must be video or song")
+        return Decision(True, "ok")
+
+    def _check_play_music(self, args: dict[str, object], ctx: PolicyContext) -> Decision:
         return Decision(True, "ok")
 
     def _check_play_video(self, args: dict[str, object], ctx: PolicyContext) -> Decision:

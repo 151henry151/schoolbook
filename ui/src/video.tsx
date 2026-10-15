@@ -20,6 +20,7 @@ export function VideoOverlay({
   audioOnly = false,
   onClose,
   onEnded,
+  onPlaying,
   onPausedChange,
   player,
 }: {
@@ -29,6 +30,7 @@ export function VideoOverlay({
   audioOnly?: boolean;
   onClose: () => void;
   onEnded?: () => void;
+  onPlaying?: () => void;
   onPausedChange?: (paused: boolean) => void;
   player?: PlayerTarget;
 }) {
@@ -78,7 +80,7 @@ export function VideoOverlay({
       const node = audio.current;
       if (!node) return;
       if (paused) node.pause();
-      else void Promise.resolve(node.play()).catch(() => {});
+      else void Promise.resolve(node.play()).catch(() => { setLocalPaused(true); onPausedChange?.(true); });
       return;
     }
     const target = player ?? frame.current?.contentWindow ?? undefined;
@@ -96,7 +98,7 @@ export function VideoOverlay({
     if (audioOnly) {
       const node = audio.current;
       if (localPaused) {
-        void Promise.resolve(node?.play()).catch(() => {});
+        void Promise.resolve(node?.play()).catch(() => { setLocalPaused(true); onPausedChange?.(true); });
         setLocalPaused(false);
         onPausedChange?.(false);
       } else {
@@ -124,7 +126,7 @@ export function VideoOverlay({
         "video-overlay",
         hidden ? "is-hidden" : "",
         audioOnly ? "audio-only" : "",
-        hideVideoCursor(paused, idle) ? "cursor-idle" : "",
+        !audioOnly && hideVideoCursor(paused, idle) ? "cursor-idle" : "",
       ]
         .filter(Boolean)
         .join(" ")}
@@ -134,7 +136,7 @@ export function VideoOverlay({
       }}
     >
       {audioOnly ? (
-        <audio ref={audio} src={songUrl(videoId)} autoPlay onEnded={() => finish("ended")} />
+        <audio ref={audio} src={songUrl(videoId)} autoPlay onPlaying={onPlaying} onError={() => { setLocalPaused(true); onPausedChange?.(true); }} onEnded={() => finish("ended")} />
       ) : (
         <iframe
           ref={frame}
@@ -157,6 +159,9 @@ export function VideoOverlay({
         aria-label="pause or play"
         onClick={toggle}
       />
+      {audioOnly ? <button type="button" className="song-toggle" aria-label={localPaused ? "Play music" : "Pause music"} onClick={toggle}>
+        <svg viewBox="0 0 48 48" aria-hidden="true">{localPaused ? <path d="M15 8L39 24 15 40Z" fill="currentColor" /> : <><rect x="12" y="9" width="9" height="30" rx="2" fill="currentColor" /><rect x="27" y="9" width="9" height="30" rx="2" fill="currentColor" /></>}</svg>
+      </button> : null}
       <button
         type="button"
         className="video-close"

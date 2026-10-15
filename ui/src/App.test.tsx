@@ -280,7 +280,7 @@ test.each([false, true])("playing media (audio only: %s) mutes input until pause
   await vi.waitFor(() => expect(listeners.length).toBe(0));
   fireEvent.click(screen.getByLabelText("pause or play"));
   await vi.waitFor(() => expect(listeners.length).toBe(1));
-  expect(socket.send).toHaveBeenCalledWith(JSON.stringify({ type: "video_ui", action: "pause" }));
+  expect(socket.send).toHaveBeenCalledWith(JSON.stringify({ type: "video_ui", action: "pause", video_id: "abcdefghijk" }));
   act(() => {
     listeners[0](new Int16Array(8), 20);
   });
@@ -288,10 +288,10 @@ test.each([false, true])("playing media (audio only: %s) mutes input until pause
   socket.send.mockClear();
   fireEvent.click(screen.getByLabelText("pause or play"));
   await vi.waitFor(() => expect(listeners.length).toBe(0));
-  expect(socket.send).toHaveBeenCalledWith(JSON.stringify({ type: "video_ui", action: "resume" }));
+  expect(socket.send).toHaveBeenCalledWith(JSON.stringify({ type: "video_ui", action: "resume", video_id: "abcdefghijk" }));
   fireEvent.click(screen.getByRole("button", { name: "close video" }));
   await vi.waitFor(() => expect(listeners.length).toBe(1));
-  expect(socket.send).toHaveBeenCalledWith(JSON.stringify({ type: "video_ui", action: "done" }));
+  expect(socket.send).toHaveBeenCalledWith(JSON.stringify({ type: "video_ui", action: "done", video_id: "abcdefghijk" }));
   act(() => {
     listeners[0](new Int16Array(8), 20);
   });
@@ -335,7 +335,7 @@ test("when a video ends the overlay closes and the microphone comes back", async
   });
   await vi.waitFor(() => expect(screen.queryByTitle("video")).toBeNull());
   await vi.waitFor(() => expect(listeners.length).toBe(1));
-  expect(socket.send).toHaveBeenCalledWith(JSON.stringify({ type: "video_ui", action: "ended" }));
+  expect(socket.send).toHaveBeenCalledWith(JSON.stringify({ type: "video_ui", action: "ended", video_id: "abcdefghijk" }));
   act(() => {
     listeners[0](new Int16Array(8), 20);
   });

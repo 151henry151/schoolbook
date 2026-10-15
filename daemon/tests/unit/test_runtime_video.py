@@ -91,3 +91,53 @@ def test_play_video_without_vet_is_denied(tmp_path: Path) -> None:
     assert play == {"error": "video has not passed vetting"}
     assert live.playing_video is None
     assert live.screen == "home"
+
+
+def test_familiar_music_tracks_actual_plays_and_survives_restart(tmp_path: Path) -> None:
+    store = _store(tmp_path)
+    runtime = _runtime(store, None)
+    live = _live(store)
+    assert runtime.run_tool(live, "play_music", {})["empty"] is True
+    for video_id in ("songid11111", "songid22222", "songid33333"):
+        runtime.approve_video(video_id, video_id, "music", 1)
+    runtime.run_tool(live, "play_video", {"video_id": "songid11111", "audio_only": True})
+    assert store.familiar_songs("kid") == []  # A failed load does not count.
+    runtime.song_started(live, "songid22222")  # Ignore stale player events.
+    assert store.familiar_songs("kid") == []
+    runtime.song_started(live, "songid11111")
+    runtime.song_started(live, "songid11111")  # Resume must not double-count.
+    from sqlalchemy import func, select
+
+    from schoolbookd.db.models import SongPlay
+
+    with store.session() as db:
+        assert db.scalar(select(func.count()).select_from(SongPlay)) == 1
+    runtime.run_tool(live, "play_video", {"video_id": "songid22222", "audio_only": True})
+    runtime.song_started(live, "songid22222")
+    runtime.run_tool(live, "play_video", {"video_id": "songid33333"})
+    runtime.song_started(live, "songid33333")  # Videos are not songs.
+    reopened = Store(session_factory(make_engine(tmp_path / "schoolbook.db")))
+    assert set(reopened.familiar_songs("kid")) == {"songid11111", "songid22222"}
+    assert reopened.familiar_songs("another-child") == []
+    first = runtime.run_tool(live, "play_music", {})
+    second = runtime.next_song(live)
+    assert second is not None
+    assert {first["playing"], second["playing"]} == {"songid11111", "songid22222"}
+    assert runtime.next_song(live) is None
+    runtime.run_tool(live, "play_music", {})
+    store.block_video(live.song_queue[0])
+    assert runtime.next_song(live) is None  # Recheck parent blocks before each track.
+    assert len(store.familiar_songs("kid")) == 1
+
+
+def test_named_song_clears_familiar_queue(tmp_path: Path) -> None:
+    store = _store(tmp_path)
+    runtime = _runtime(store, None)
+    live = _live(store)
+    for video_id in ("songid11111", "songid22222"):
+        runtime.approve_video(video_id, video_id, "music", 1)
+        store.record_song_play("kid", video_id)
+    runtime.run_tool(live, "play_music", {})
+    assert live.song_queue
+    runtime.run_tool(live, "play_video", {"video_id": "songid11111", "audio_only": True})
+    assert not live.song_queue

@@ -373,7 +373,7 @@ export function App() {
     setVideoPaused(false);
     setVideoAudioOnly(false);
     setVideoId("");
-    send({ type: "video_ui", action });
+    send({ type: "video_ui", action, video_id: videoId });
   }
 
   function resetListen() {
@@ -610,7 +610,9 @@ export function App() {
       ) : null}
       {videoId ? (
         <VideoOverlay
+          key={videoId}
           videoId={videoId}
+          onPlaying={() => send({ type: "video_ui", action: "playing", video_id: videoId })}
           paused={videoPaused}
           audioOnly={videoAudioOnly}
           hidden={Boolean(pictureId || pictureLoading)}
@@ -619,7 +621,7 @@ export function App() {
           onPausedChange={(paused) => {
             mediaPlaying.current = !paused;
             setVideoPaused(paused);
-            send({ type: "video_ui", action: paused ? "pause" : "resume" });
+            send({ type: "video_ui", action: paused ? "pause" : "resume", video_id: videoId });
           }}
         />
       ) : null}

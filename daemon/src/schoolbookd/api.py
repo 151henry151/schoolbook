@@ -532,7 +532,20 @@ def child_app(host: Host) -> FastAPI:
                         speech.reset(speech.attempt_id)
                 elif incoming.type == "video_ui":
                     live = host.ensure_live()
+                    if incoming.video_id and incoming.video_id != live.playing_video:
+                        continue
+                    if incoming.action == "playing":
+                        host.runtime.song_started(live, incoming.video_id)
+                        continue
+                    if incoming.action == "ended":
+                        next_song = host.runtime.next_song(live)
+                        if next_song is not None:
+                            await emit({"type": "video", "action": "play",
+                                        "video_id": next_song["playing"], "audio_only": True,
+                                        "start_s": None, "end_s": None, "at_s": None})
+                            continue
                     if incoming.action in {"done", "ended"}:
+                        live.song_queue.clear()
                         live.playing_video = None
                         live.screen = "home"
                     if speech is not None:
@@ -960,12 +973,13 @@ def _ws_messages(outcome: TurnOutcome, turn_id: str) -> list[dict[str, object]]:
                     "options": record.arguments.get("options", []),
                 }
             )
-        if record.name == "play_video":
+        if record.name in {"play_video", "play_music"} and "playing" in record.result:
             messages.append(
                 {
                     "type": "video",
                     "action": "play",
-                    "video_id": record.arguments.get("video_id", ""),
+                    "video_id": record.result["playing"],
+                    "audio_only": bool(record.result.get("audio_only")),
                     "start_s": record.arguments.get("start"),
                     "end_s": record.arguments.get("end"),
                     "at_s": None,

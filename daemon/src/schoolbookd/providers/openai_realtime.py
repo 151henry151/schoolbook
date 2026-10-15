@@ -85,6 +85,9 @@ def spoken_child_instructions(
                 "Do not call ask_choice. Ask one spoken question and wait. "
                 "Pictures and videos are fine. Keep turns short and warm. "
                 "Talk the way a kind person talks to a six-year-old. "
+                "When he asks for music without naming a song, such as I want to hear some music, "
+                "call play_music to play his previously heard songs. Do not search for new music. "
+                "If the history is empty, ask which song he wants. "
                 "When he clearly asks to hear a song, say only: Okay, I'll play [song name]. "
                 "Do not say clean, radio edit, audio version, or that you are looking. "
                 "Then call search_videos with kind song, prefer a clean official audio track "
@@ -231,9 +234,17 @@ def _blocked_song_title(topic: str) -> bool:
     return any(marker in lowered for marker in _APP_MARKERS)
 
 
+def familiar_music_request(text: str) -> bool:
+    return bool(re.fullmatch(
+        r"(?:please )?(?:(?:i (?:want|would like|wanna)(?: to)?|can (?:i|you)|could you|let.s) )?"
+        r"(?:hear|listen to|play|put on)(?: me)? (?:some |my |our |the |a )?"
+        r"(?:music|songs?)(?: please)?[.!?]*", text.strip().lower()
+    ))
+
+
 def _song_request(text: str) -> tuple[str, str] | None:
     stripped = (text or "").strip()
-    if not stripped or video_topic(stripped):
+    if not stripped or video_topic(stripped) or familiar_music_request(stripped):
         return None
     for pattern in _CLEAR_SONG_PATTERNS:
         match = pattern.search(stripped)
@@ -267,6 +278,8 @@ def maybe_song_topic(text: str) -> str | None:
 
 
 def song_listen_briefing(child_text: str, *, name: str = "the child") -> str | None:
+    if familiar_music_request(child_text):
+        return "The child wants familiar music. Call play_music. If empty, ask which song to play."
     topic = song_topic(child_text)
     if topic is None:
         return None
@@ -757,6 +770,13 @@ REALTIME_TOOLS: list[dict[str, object]] = [
             "properties": {"video_id": {"type": "string"}},
             "required": ["video_id"],
         },
+    },
+    {
+        "type": "function",
+        "name": "play_music",
+        "description": ("Play a queue of this child's previously heard songs. "
+                        "Use for general music requests, not a named song. If empty, ask for a song name."),
+        "parameters": {"type": "object", "properties": {}, "additionalProperties": False},
     },
     {
         "type": "function",
@@ -1257,7 +1277,7 @@ class RealtimeMapper:
         elif name == "show_picture" and result.get("image_id") and "error" not in result:
             self.pending_picture = {"type": "picture", "image_id": str(result["image_id"])}
             self.hold_picture = True
-        elif name == "play_video" and "playing" in result and "error" not in result:
+        elif name in {"play_video", "play_music"} and "playing" in result and "error" not in result:
             self.pending_video = {
                 "type": "video",
                 "action": "play",

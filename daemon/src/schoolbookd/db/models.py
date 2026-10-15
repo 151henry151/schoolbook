@@ -224,3 +224,13 @@ class AppSetting(Base):
     enabled: Mapped[int] = mapped_column(Integer, default=1)
     time_cap_minutes: Mapped[int | None] = mapped_column(Integer, nullable=True)
     activities_json: Mapped[str] = mapped_column(Text, default="[]")
+
+
+class SongPlay(Base):
+    """One confirmed audio playback, scoped to a learner."""
+
+    __tablename__ = "song_plays"
+    id: Mapped[str] = mapped_column(String, primary_key=True)
+    learner_id: Mapped[str] = mapped_column(ForeignKey("learners.id"), index=True)
+    video_id: Mapped[str] = mapped_column(ForeignKey("videos.id"))
+    played_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)

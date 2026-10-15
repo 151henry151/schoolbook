@@ -26,6 +26,7 @@ from schoolbookd.db.models import (
     Setting,
     Skill,
     SkillState,
+    SongPlay,
     ToolCall,
     Turn,
     Video,
@@ -440,6 +441,26 @@ class Store:
         with self.session() as db:
             db.merge(video)
             db.commit()
+
+    def record_song_play(self, learner_id: str, video_id: str) -> None:
+        with self.session() as db:
+            if db.get(Video, video_id) is not None:
+                db.add(SongPlay(id=_id(), learner_id=learner_id, video_id=video_id))
+                db.commit()
+
+    def familiar_songs(self, learner_id: str) -> list[str]:
+        from sqlalchemy import func
+
+        with self.session() as db:
+            rows = db.scalars(
+                select(SongPlay.video_id)
+                .join(Video, SongPlay.video_id == Video.id)
+                .where(SongPlay.learner_id == learner_id, Video.verdict == "approved")
+                .group_by(SongPlay.video_id)
+                .order_by(func.max(SongPlay.played_at).desc())
+                .limit(100)
+            )
+            return list(rows)
 
     def video(self, video_id: str) -> Video | None:
         with self.session() as db:
