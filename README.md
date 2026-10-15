@@ -69,6 +69,21 @@ The child’s song screen has a large **pause/play** button. Pausing allows spee
 
 Schoolbook records a song after its audio actually starts, once per play (pausing/resuming does not count twice). History is saved per learner in SQLite and survives restarts. Requests such as “I want to hear some music” use `play_music` to shuffle previously heard, still-approved songs and play each once. Naming a song keeps the existing search-and-play behavior. If there is no history yet, the tutor asks which song to play. History begins with this update; old video play counts cannot reliably distinguish songs. Parent blocks are rechecked before each queued track. Migration `0002` adds `song_plays` without changing existing learner records.
 
+## Parent console on romptele.com
+
+Open **https://romptele.com/schoolbook/** on a phone or another laptop and use the existing Schoolbook parent password. The responsive console has Today, saved conversations, Progress, Memory, Library, Apps, Session, Learner, and Settings. Session timestamps use America/New_York time (EST in winter, EDT during daylight saving), regardless of the viewing device’s timezone. Use **Refresh** for current information and **Lock console** when finished. Ending a child’s session requires confirmation. The old Pause control is omitted because it did not pause the Realtime speech path reliably.
+
+The built console is hosted on romptele.com; authenticated API requests travel over a separate reverse SSH tunnel to the CF-30’s loopback-only parent API. The CF-30 must be on, online, and running Schoolbook to view its data or use controls. Keep its system clock synchronized: the deployed CF-30 uses `systemd-timesyncd` with NTP enabled (`timedatectl show -p NTPSynchronized` should report `yes`). Timezone formatting cannot repair timestamps previously recorded with an incorrect system clock. No learner database or AI keys are copied into the public website. API responses are not cached; HTTPS cookies are Secure, HttpOnly, SameSite=Strict and scoped to `/schoolbook/`. Cross-origin API requests are rejected. The existing parent password/idle-lock checks remain in force.
+
+Deployment (independent of the kiosk restart):
+
+1. Build `console/` with `npm ci && npm run build`, and copy `console/dist/` to `/var/www/schoolbook-console/` on romptele.com.
+2. Install `packaging/systemd/schoolbook-console-tunnel.service` in `/etc/systemd/system/` on the CF-30. As root, run `systemctl daemon-reload` and `systemctl enable --now schoolbook-console-tunnel.service`. It uses the already configured SSH identity and verified romptele.com host key; its separate loopback listener is `127.0.0.1:28766` on the server. It does not restart the existing SSH tunnel or kiosk.
+3. Include `packaging/nginx/schoolbook-http.conf` in nginx’s `http` context and `schoolbook-locations.conf` inside romptele.com’s HTTPS server block. The live infrastructure copies belong in `/home/henry/webserver/nginx/conf.d/` and `/home/henry/webserver/nginx/snippets/`, respectively. Test with `sudo nginx -t`, then gracefully reload nginx. Do not expose port 28766 publicly.
+4. Verify `/schoolbook/` serves the login page and `/schoolbook/api/today` returns 401 before login. To disable remote access, stop/disable only `schoolbook-console-tunnel.service`; local Schoolbook continues running.
+
+Console assets and API requests use relative paths, so the same build still works directly at `http://127.0.0.1:8766/`. Changing the hosted path also requires updating the nginx locations and cookie scope.
+
 ## License
 
 GPL-3.0-or-later. See [LICENSE](LICENSE) and [NOTICE](NOTICE).

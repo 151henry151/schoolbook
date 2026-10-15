@@ -36,3 +36,18 @@ test("a parent sees an open flag after unlocking", async () => {
   expect(screen.getByText(/I am scared/)).toBeTruthy();
   expect(screen.getByRole("button", { name: "Library" })).toBeTruthy();
 });
+
+test("restores a signed-in parent and reports a failed action without logging out", async () => {
+  vi.stubGlobal("fetch", vi.fn(async (url: string, init?: RequestInit) => {
+    if (init?.method === "POST") return { ok: false, status: 503 };
+    if (String(url).endsWith("/api/today")) return { ok: true, json: async () => ({ in_session: true, screen: "home", minutes: 2, open_flags: [], latest_summary: "Learning.", model_calls: 1, spend_alert_cents: 0 }) };
+    if (String(url).endsWith("/api/library/videos")) return { ok: true, json: async () => [{id: "song1", title: "A song", verdict: "approved", reasons: ""}] };
+    return { ok: false, status: 404 };
+  }));
+  render(<App />);
+  fireEvent.click(await screen.findByRole("button", {name: "Library"}));
+  fireEvent.click(await screen.findByRole("button", {name: "Block"}));
+  expect(await screen.findByRole("alert")).toHaveProperty("textContent", "The Schoolbook laptop is offline. Try again when it is connected.");
+  expect(screen.queryByLabelText("parent password")).toBeNull();
+  expect(screen.queryByText("Saved.")).toBeNull();
+});
