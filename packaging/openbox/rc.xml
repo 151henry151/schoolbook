@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- SPDX-License-Identifier: GPL-3.0-or-later -->
+<!-- SPDX-FileCopyrightText: 2026 Schoolbook contributors -->
+<openbox_config xmlns="http://openbox.org/3.4/rc">
+  <keyboard>
+    <!-- Handled outside Chromium, including when its renderer is stuck. -->
+    <keybind key="F11">
+      <action name="Execute">
+        <command>systemctl --no-block restart schoolbook-kiosk.service</command>
+      </action>
+    </keybind>
+  </keyboard>
+</openbox_config>

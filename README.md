@@ -49,6 +49,12 @@ After the avatar tap, the microphone stays on. Speak, pause, and the tutor answe
 
 `schoolbookd --config` still serves only the HTTP API if you need that without cage.
 
+## CF-30 kiosk controls
+
+In the CF-30's systemd-managed X11/Openbox kiosk, **F11 restarts Schoolbook**, including the tutor backend, browser, audio session, and any open game. The current conversation is interrupted, but the laptop does not reboot and saved learner data remains. The key is handled by Openbox, so it can recover a frozen browser. It requires the root-run `schoolbook-kiosk.service` and `packaging/xinitrc`; it is not a shortcut in ordinary desktop or Cage sessions. An OS or X server freeze still needs separate recovery.
+
+For an existing CF-30 installation, update the application and rebuild `ui/`, including `packaging/openbox/rc.xml`. Install the updated `packaging/systemd/schoolbook-kiosk.service` in `/etc/systemd/system/` and run `systemctl daemon-reload` as root; its ten-second stop timeout bounds recovery from stuck processes. The Openbox binding takes effect on the next kiosk start. Arrange that restart for a break in use; avoid restarting the kiosk while a child is using it.
+
 ## License
 
 GPL-3.0-or-later. See [LICENSE](LICENSE) and [NOTICE](NOTICE).

@@ -100,6 +100,7 @@ if command -v pipewire >/dev/null; then
     done
   ) &
 fi
-openbox &
+schoolbook_root="${SCHOOLBOOK_ROOT:-/root/schoolbook}"
+openbox --config-file "$schoolbook_root/packaging/openbox/rc.xml" &
 # Do not exec: replacing this shell SIGHUPs PipeWire and Chromium loses the mic.
-/root/schoolbook/.venv/bin/schoolbook
+"$schoolbook_root/.venv/bin/schoolbook"
