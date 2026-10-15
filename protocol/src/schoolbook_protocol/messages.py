@@ -57,7 +57,7 @@ class BoardTap(BaseModel):
 
 class VideoUi(BaseModel):
     type: Literal["video_ui"] = "video_ui"
-    action: Literal["pause", "resume", "done"]
+    action: Literal["pause", "resume", "done", "ended"]
 
 
 class AppUi(BaseModel):

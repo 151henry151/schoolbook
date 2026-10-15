@@ -1,7 +1,15 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // SPDX-FileCopyrightText: 2026 Schoolbook contributors
 
-import { embedUrl, holdComplete, playerCommand, silenceEndsTurn, songUrl, startEmbeddedPlayer } from "./capture";
+import {
+  embedUrl,
+  holdComplete,
+  playerCommand,
+  silenceEndsTurn,
+  songUrl,
+  startEmbeddedPlayer,
+  youtubePlayerEnded,
+} from "./capture";
 
 test("the parent hold is five seconds and silence ends a turn at 1.5 seconds", () => {
   expect(holdComplete(4999)).toBe(false);
@@ -44,4 +52,14 @@ test("startEmbeddedPlayer unmutes then plays", () => {
 test("songs use a local audio path", () => {
   expect(songUrl("songid11111")).toBe("/songs/songid11111");
   expect(() => songUrl("https://evil.example")).toThrow();
+});
+
+test("a youtube ended state is detected from player messages", () => {
+  expect(youtubePlayerEnded({ event: "infoDelivery", info: { playerState: 0 } })).toBe(true);
+  expect(youtubePlayerEnded(JSON.stringify({ event: "onStateChange", info: 0 }))).toBe(true);
+  expect(youtubePlayerEnded({ event: "infoDelivery", info: { playerState: 1 } })).toBe(false);
+  expect(youtubePlayerEnded({ event: "onStateChange", info: 2 })).toBe(false);
+  expect(youtubePlayerEnded({ event: "onReady" })).toBe(false);
+  expect(youtubePlayerEnded({ event: "initialDelivery", info: { playerState: 0 } })).toBe(false);
+  expect(youtubePlayerEnded("not-json")).toBe(false);
 });

@@ -76,6 +76,9 @@ test("child and tutor lines stay on screen together", async () => {
   fireEvent.click(await screen.findByRole("button", { name: "Arum" }));
   act(() => {
     socket.onmessage?.({
+      data: JSON.stringify({ type: "state", name: "listening", detail: "hearing" }),
+    } as MessageEvent);
+    socket.onmessage?.({
       data: JSON.stringify({
         type: "transcript",
         role: "child",
@@ -158,6 +161,44 @@ test("the child's line waits for the finished sentence the agent heard", async (
   expect(screen.getByText("How deep can a great white shark go?")).toBeTruthy();
 });
 
+test("the avatar tap shows the listening ear even if the tutor spoke on the home screen", async () => {
+  const listeners: Array<(pcm: Int16Array, dtMs: number) => void> = [];
+  vi.mocked(startMic).mockImplementation(async (onFrame) => {
+    listeners.push(onFrame);
+    return () => {
+      const index = listeners.indexOf(onFrame);
+      if (index >= 0) listeners.splice(index, 1);
+    };
+  });
+  render(<App />);
+  await vi.waitFor(() => expect(sockets.length).toBe(1));
+  const socket = sockets[0];
+  act(() => {
+    socket.onmessage?.({
+      data: JSON.stringify({ type: "hello_ok", voice: "realtime", learner_name: "Arum" }),
+    } as MessageEvent);
+    socket.onmessage?.({
+      data: JSON.stringify({ type: "state", name: "speaking" }),
+    } as MessageEvent);
+    socket.onmessage?.({
+      data: JSON.stringify({
+        type: "audio_chunk",
+        turn_id: "live",
+        pcm_b64: "AAA=",
+        sample_rate: 24000,
+      }),
+    } as MessageEvent);
+  });
+  fireEvent.click(await screen.findByRole("button", { name: "Arum" }));
+  expect(await screen.findByRole("status", { name: "listening" })).toBeTruthy();
+  await vi.waitFor(() => expect(listeners.length).toBe(1));
+  socket.send.mockClear();
+  act(() => {
+    listeners[0](new Int16Array(8), 20);
+  });
+  expect(socket.send.mock.calls.some((call) => String(call[0]).includes("audio_frame"))).toBe(true);
+});
+
 test("a blocked microphone is shown after the avatar tap", async () => {
   vi.mocked(startMic).mockRejectedValue(new Error("Permission denied"));
   render(<App />);
@@ -210,6 +251,50 @@ test("playing a video stops mic frames until the child closes it", async () => {
   fireEvent.click(screen.getByRole("button", { name: "close video" }));
   await vi.waitFor(() => expect(listeners.length).toBe(1));
   expect(socket.send).toHaveBeenCalledWith(JSON.stringify({ type: "video_ui", action: "done" }));
+  act(() => {
+    listeners[0](new Int16Array(8), 20);
+  });
+  expect(socket.send.mock.calls.some((call) => String(call[0]).includes("audio_frame"))).toBe(true);
+});
+
+test("when a video ends the overlay closes and the microphone comes back", async () => {
+  const listeners: Array<(pcm: Int16Array, dtMs: number) => void> = [];
+  vi.mocked(startMic).mockImplementation(async (onFrame) => {
+    listeners.push(onFrame);
+    return () => {
+      const index = listeners.indexOf(onFrame);
+      if (index >= 0) listeners.splice(index, 1);
+    };
+  });
+  render(<App />);
+  await vi.waitFor(() => expect(sockets.length).toBe(1));
+  const socket = sockets[0];
+  act(() => {
+    socket.onmessage?.({
+      data: JSON.stringify({ type: "hello_ok", voice: "realtime", learner_name: "Arum" }),
+    } as MessageEvent);
+  });
+  fireEvent.click(await screen.findByRole("button", { name: "Arum" }));
+  await vi.waitFor(() => expect(listeners.length).toBe(1));
+  act(() => {
+    socket.onmessage?.({
+      data: JSON.stringify({ type: "video", action: "play", video_id: "abcdefghijk" }),
+    } as MessageEvent);
+  });
+  expect(await screen.findByTitle("video")).toBeTruthy();
+  await vi.waitFor(() => expect(listeners.length).toBe(0));
+  socket.send.mockClear();
+  act(() => {
+    window.dispatchEvent(
+      new MessageEvent("message", {
+        origin: "https://www.youtube-nocookie.com",
+        data: JSON.stringify({ event: "infoDelivery", info: { playerState: 0 } }),
+      }),
+    );
+  });
+  await vi.waitFor(() => expect(screen.queryByTitle("video")).toBeNull());
+  await vi.waitFor(() => expect(listeners.length).toBe(1));
+  expect(socket.send).toHaveBeenCalledWith(JSON.stringify({ type: "video_ui", action: "ended" }));
   act(() => {
     listeners[0](new Int16Array(8), 20);
   });
@@ -401,6 +486,9 @@ test("the microphone button stops talk and starts a fresh listen", async () => {
   await vi.waitFor(() => expect(listeners.length).toBe(1));
   act(() => {
     socket.onmessage?.({
+      data: JSON.stringify({ type: "state", name: "listening", detail: "hearing" }),
+    } as MessageEvent);
+    socket.onmessage?.({
       data: JSON.stringify({ type: "state", name: "speaking" }),
     } as MessageEvent);
     socket.onmessage?.({
@@ -547,4 +635,61 @@ test("a picture over a paused video keeps the player so resume can continue", as
   await vi.waitFor(() => expect(screen.queryByRole("img", { name: "blue-whale-school-bus" })).toBeNull());
   expect(screen.getByTitle("video")).toBeTruthy();
   await vi.waitFor(() => expect(listeners.length).toBe(0));
+});
+
+test("a wifi probe failure does not put the tutor to rest", async () => {
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async (url: string) => {
+      if (String(url).endsWith("/wifi")) {
+        return {
+          ok: false,
+          json: async () => ({
+            error: "NetworkManager is not running.",
+            connected: false,
+            ssid: null,
+            online: false,
+            networks: [],
+          }),
+        };
+      }
+      return { ok: true, json: async () => ({ token: "boot" }) };
+    }),
+  );
+  render(<App />);
+  await vi.waitFor(() => expect(sockets.length).toBe(1));
+  await act(async () => {
+    await Promise.resolve();
+  });
+  expect(screen.queryByText("The tutor is resting.")).toBeNull();
+  expect(screen.queryByRole("region", { name: "Wi-Fi" })).toBeNull();
+});
+
+test("offline rest shows a Wi-Fi picker", async () => {
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async (url: string) => {
+      if (String(url).endsWith("/wifi")) {
+        return {
+          ok: true,
+          json: async () => ({
+            connected: false,
+            ssid: null,
+            online: false,
+            networks: [{ ssid: "Grandpa", signal: 70, secured: true }],
+          }),
+        };
+      }
+      return { ok: true, json: async () => ({ token: "boot" }) };
+    }),
+  );
+  render(<App />);
+  await vi.waitFor(() => expect(sockets.length).toBe(1));
+  act(() => {
+    sockets[0].onmessage?.({
+      data: JSON.stringify({ type: "state", name: "offline" }),
+    } as MessageEvent);
+  });
+  expect(await screen.findByRole("region", { name: "Wi-Fi" })).toBeTruthy();
+  expect(screen.getByRole("button", { name: "Grandpa" })).toBeTruthy();
 });

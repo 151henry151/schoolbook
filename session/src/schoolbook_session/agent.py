@@ -34,7 +34,7 @@ def accept_launch(message: LaunchApp, allowlist: set[str]) -> list[str]:
 def chromium_kiosk_argv(url: str, binary: str = "chromium") -> list[str]:
     if not url.startswith("http://127.0.0.1") and not url.startswith("http://localhost"):
         raise LaunchDenied("kiosk URL must stay on localhost")
-    return [
+    argv = [
         binary,
         "--kiosk",
         "--no-first-run",
@@ -43,8 +43,15 @@ def chromium_kiosk_argv(url: str, binary: str = "chromium") -> list[str]:
         "--password-store=basic",
         "--autoplay-policy=no-user-gesture-required",
         "--use-fake-ui-for-media-stream",
-        url,
     ]
+    if os.environ.get("SCHOOLBOOK_DISABLE_GPU") == "1":
+        argv.extend(["--disable-gpu", "--disable-gpu-rasterization", "--disable-dev-shm-usage"])
+    if os.environ.get("DISPLAY") and not os.environ.get("WAYLAND_DISPLAY"):
+        argv.append("--ozone-platform=x11")
+    if os.geteuid() == 0:
+        argv.extend(["--no-sandbox", "--disable-setuid-sandbox"])
+    argv.append(url)
+    return argv
 
 
 def handle_line(line: str, allowlist: set[str]) -> dict[str, object]:

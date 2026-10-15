@@ -22,7 +22,7 @@ def picture_prompt(brief: str) -> str:
         "for a curious six-year-old. "
         "The tutor's point to illustrate is: "
         f"{brief} "
-        "Choose the best way to show that point: how it looks, how it works, "
+        "Choose the best way to show that point: how it works, "
         "a simple process, or a size comparison if that is the point. "
         "Use your judgment. Do not only make scale charts. "
         "If you do compare size, depth, or distance, make everyday objects "
@@ -30,9 +30,23 @@ def picture_prompt(brief: str) -> str:
         "Do not use a ruler, tick marks, or tiny true-scale dots. "
         "No zoom boxes. "
         "Make the idea obvious, not an artistic scene. "
+        "Do not paint a realistic picture of how a creature looks. "
         "No text, letters, logos, or watermark. "
         "Not a baby cartoon or nursery drawing. "
         "Return only the SVG."
+    )
+
+
+def looks_prompt(brief: str) -> str:
+    return (
+        "A single kid-friendly picture for a curious six-year-old. "
+        "Show how this looks, as a clear painting, not a diagram. "
+        f"{brief} "
+        "If this is a legend or a story creature, draw how people imagine it, "
+        "not a photograph of a real animal. "
+        "Warm and gentle, not scary or gory. "
+        "No text, letters, logos, or watermark. "
+        "Not a baby cartoon or nursery drawing."
     )
 
 

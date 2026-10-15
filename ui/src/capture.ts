@@ -56,16 +56,34 @@ export function startEmbeddedPlayer(target: PlayerTarget | null | undefined): vo
   playerCommand(target, "playVideo");
 }
 
-export function youtubePlayerReady(data: unknown): boolean {
+function youtubePlayerPayload(data: unknown): { event?: string; info?: unknown } | null {
   let payload = data;
   if (typeof payload === "string") {
     try {
       payload = JSON.parse(payload);
     } catch {
-      return false;
+      return null;
     }
   }
-  return Boolean(payload && typeof payload === "object" && (payload as { event?: string }).event === "onReady");
+  if (!payload || typeof payload !== "object") return null;
+  return payload as { event?: string; info?: unknown };
+}
+
+export function youtubePlayerReady(data: unknown): boolean {
+  const payload = youtubePlayerPayload(data);
+  return Boolean(payload && payload.event === "onReady");
+}
+
+export function youtubePlayerEnded(data: unknown): boolean {
+  const payload = youtubePlayerPayload(data);
+  if (!payload) return false;
+  if (payload.event === "initialDelivery") return false;
+  const info = payload.info;
+  if (info === 0) return payload.event === "onStateChange" || payload.event === "infoDelivery";
+  if (info && typeof info === "object" && (info as { playerState?: unknown }).playerState === 0) {
+    return payload.event === "onStateChange" || payload.event === "infoDelivery";
+  }
+  return false;
 }
 
 export const OFFLINE_APPS = ["GCompris", "Tux Paint", "KTurtle", "Stellarium", "Marble"];

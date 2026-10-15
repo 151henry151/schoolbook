@@ -8,6 +8,8 @@ from __future__ import annotations
 import array
 import json
 import re
+import sys
+import time
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from typing import Any
@@ -104,10 +106,16 @@ def spoken_child_instructions(
                 "The default for a question is to answer it verbally with words. "
                 "Every time he asks a question, carefully consider whether a picture "
                 "or a video would be very helpful. Most questions do not need either. "
-                "Call show_picture only if an illustration would be very helpful "
-                "for seeing how something looks, how big it is, or a process you can see. "
-                "Then pass a short topic and a brief that tells Claude the point to illustrate. "
-                "Let Claude choose how to draw it. Do not ask for an artistic scene. "
+                "Call show_picture only if a picture would be very helpful. "
+                "If he wants to see how something looks, call show_picture with kind looks. "
+                "If he needs a size comparison or a how-it-works diagram, like gears or electricity, "
+                "call show_picture with kind diagram. "
+                "Claude draws diagrams and chooses how to show the point. "
+                "Kind looks is a painted picture of appearance. "
+                "Do not use a diagram to illustrate how a creature looks. "
+                "If it is a legend, a myth, or a story creature, tell what is really true "
+                "and where the story came from, then show how people imagine it with kind looks. "
+                "Say clearly it is a story, not a real animal. "
                 "If watching something happen would best explain the answer, "
                 "suggest a short educational YouTube video out loud, then search, vet, and play it. "
                 "Do not make a picture or suggest a video unless it would really help. "
@@ -118,9 +126,8 @@ def spoken_child_instructions(
                 "He cannot read. If a system note says the words were unclear, speak those words out loud: "
                 "It sounded like you said [the words]. Is that what you said? "
                 "Do not ask that on a normal sentence. "
-                "If he talks about made-up characters, magic lands, or pretend stories, "
-                "be warm for one short beat, then gently steer toward something real he can learn. "
-                "Do not dwell on the pretend world. "
+                "TV and video-game characters are different: be warm once, then steer to something real. "
+                "Do not dwell on those pretend worlds. "
                 "If a video is paused and the child talks, listen. "
                 "If they ask a question about the video, answer it and call show_picture if a picture helps. "
                 "Then ask if they want to keep watching. "
@@ -426,6 +433,14 @@ def paused_video_note() -> str:
     )
 
 
+def finished_video_note() -> str:
+    return (
+        "The video finished and the player closed. Speak a short thing about it. "
+        "Invite a question about it, or something else they want to do. "
+        "Do not start another video or song unless they ask."
+    )
+
+
 _FANTASY_MARKERS = (
     "pokemon",
     "pikachu",
@@ -470,6 +485,64 @@ def looks_like_fantasy(text: str) -> bool:
     return any(re.search(r"\b" + re.escape(marker) + r"\b", lowered) for marker in _FANTASY_MARKERS)
 
 
+_MEDIA_MARKERS = (
+    "pokemon",
+    "pikachu",
+    "spiderman",
+    "spider-man",
+    "batman",
+    "elsa",
+    "frozen",
+    "peppa",
+    "cocomelon",
+    "minecraft",
+    "roblox",
+    "fortnite",
+    "mario",
+    "sonic",
+    "harry potter",
+    "hogwarts",
+    "jedi",
+    "sith",
+    "lightsaber",
+    "superhero",
+    "supervillain",
+)
+
+_PICTURE_ASK = re.compile(
+    r"(?:"
+    r"\bshow me (?:a |an )?(?:picture|drawing|photo)\b|"
+    r"\bpicture of\b|"
+    r"\bdraw (?:me |a |an )?\b|"
+    r"\bwhat does\b.+\blook like\b|"
+    r"\bwhat do\b.+\blook like\b"
+    r")",
+    re.I,
+)
+
+
+def looks_like_media_character(text: str) -> bool:
+    lowered = (text or "").lower()
+    return any(re.search(r"\b" + re.escape(marker) + r"\b", lowered) for marker in _MEDIA_MARKERS)
+
+
+def looks_like_picture_ask(text: str) -> bool:
+    return bool(_PICTURE_ASK.search(text or ""))
+
+
+def picture_request_briefing(child_text: str, *, name: str = "the child") -> str | None:
+    if not looks_like_picture_ask(child_text) or looks_like_media_character(child_text):
+        return None
+    return (
+        f"{name} wants to see a picture. "
+        "If they want how it looks, call show_picture with kind looks. "
+        "If they need a size comparison or a how-it-works diagram, use kind diagram. "
+        "If it is a legend, a myth, or a story creature, tell what is really true "
+        "and where the story came from, then show how people imagine it with kind looks. "
+        "Say clearly it is a story, not a real animal."
+    )
+
+
 _GREETING = re.compile(r"\bhow are you\b|\bhow's it going\b|\bhow is it going\b", re.I)
 _CURIOUS = re.compile(
     r"(?:"
@@ -504,14 +577,22 @@ def answer_first_nudge(text: str, *, name: str = "the child") -> str | None:
         f"{name} asked a question. Finish the answer in this turn. "
         "The default is to answer verbally with words. "
         "Carefully consider whether a picture or a video would be very helpful. "
-        "Call show_picture only if an illustration would be very helpful. "
+        "Call show_picture only if a picture would be very helpful. "
+        "Use kind looks to show how something looks. Use kind diagram for size or how it works. "
+        "If this is a legend, a myth, or a story creature, tell what is really true "
+        "and where the story came from. If a picture of how people imagine it would help, "
+        "call show_picture with kind looks and say it is a story, not a real animal. "
         "If a YouTube video would best explain it, suggest that video out loud, then search, vet, and play it. "
         "If neither is needed, just talk. Do not stop after a lead-in sentence."
     )
 
 
 def real_world_nudge(text: str, *, name: str = "the child") -> str | None:
-    if not looks_like_fantasy(text):
+    if looks_like_media_character(text):
+        pass
+    elif looks_like_picture_ask(text):
+        return None
+    elif not looks_like_fantasy(text):
         return None
     return (
         f"{name} brought up something made-up or from a story. "
@@ -558,6 +639,41 @@ def resample_pcm16(pcm: bytes, from_rate: int, to_rate: int) -> bytes:
     return out.tobytes()
 
 
+def pcm16_rms(pcm: bytes) -> float:
+    if len(pcm) < 2:
+        return 0.0
+    samples = array.array("h")
+    samples.frombytes(pcm[: len(pcm) - (len(pcm) % 2)])
+    if not samples:
+        return 0.0
+    return (sum(sample * sample for sample in samples) / len(samples)) ** 0.5
+
+
+def gain_pcm16(pcm: bytes, factor: float) -> bytes:
+    samples = array.array("h")
+    samples.frombytes(pcm[: len(pcm) - (len(pcm) % 2)])
+    for index, sample in enumerate(samples):
+        boosted = int(sample * factor)
+        samples[index] = max(-32768, min(32767, boosted))
+    return samples.tobytes()
+
+
+def autogain_pcm16(
+    pcm: bytes,
+    *,
+    target_rms: float = 4000,
+    max_factor: float = 12,
+    gate: float = 800,
+) -> bytes:
+    rms = pcm16_rms(pcm)
+    if rms < gate:
+        return pcm
+    factor = min(max_factor, target_rms / rms)
+    if factor <= 1:
+        return pcm
+    return gain_pcm16(pcm, factor)
+
+
 def session_update(
     *,
     instructions: str,
@@ -581,7 +697,7 @@ def session_update(
                         "interrupt_response": False,
                         "silence_duration_ms": 1600,
                         "prefix_padding_ms": 400,
-                        "threshold": 0.6,
+                        "threshold": 0.3,
                     },
                     "transcription": {"model": "gpt-4o-mini-transcribe"},
                 },
@@ -667,18 +783,20 @@ REALTIME_TOOLS: list[dict[str, object]] = [
         "type": "function",
         "name": "show_picture",
         "description": (
-            "Show an educational picture only if an illustration would be very helpful. "
-            "The default is to skip this and answer with words. "
-            "Pass a short topic and a brief that states the point to illustrate. "
-            "Claude chooses how to draw it."
+            "Show a picture only if it would be very helpful. "
+            "kind looks: how something looks, including an imagined story creature. "
+            "kind diagram: size, how parts work, gears, electricity, a process. "
+            "Claude draws diagrams. Pass a short topic and a brief that states the point. "
+            "For a legend, the brief should say it is how people imagine the story."
         ),
         "parameters": {
             "type": "object",
             "properties": {
                 "topic": {"type": "string"},
                 "brief": {"type": "string"},
+                "kind": {"type": "string", "enum": ["diagram", "looks"]},
             },
-            "required": ["topic", "brief"],
+            "required": ["topic", "brief", "kind"],
         },
     },
     {
@@ -886,7 +1004,10 @@ class RealtimeMapper:
             self.child_partial = ""
             decision, cleaned = child_speech_decision(text)
             if decision == "wait":
-                return ([], [])
+                return (
+                    [{"type": "state", "name": "listening", "detail": ""}],
+                    [{"type": "input_audio_buffer.clear"}],
+                )
             outbound: list[dict[str, object]] = []
             messages: list[dict[str, object]] = [
                 {
@@ -962,6 +1083,18 @@ class RealtimeMapper:
                                 "type": "message",
                                 "role": "system",
                                 "content": [{"type": "input_text", "text": game}],
+                            },
+                        }
+                    )
+                picture = picture_request_briefing(cleaned, name=self.child_name) if cleaned else None
+                if picture:
+                    outbound.append(
+                        {
+                            "type": "conversation.item.create",
+                            "item": {
+                                "type": "message",
+                                "role": "system",
+                                "content": [{"type": "input_text", "text": picture}],
                             },
                         }
                     )
@@ -1214,6 +1347,7 @@ class RealtimeTalk:
     voice: str = DEFAULT_TUTOR_VOICE
     tutor_name: str = DEFAULT_TUTOR_NAME
     _socket: Any = None
+    _last_mic_log: float = 0.0
 
     async def start(self) -> None:
         opener = self.connect or _default_connect
@@ -1253,7 +1387,15 @@ class RealtimeTalk:
 
         if self._socket is None:
             return
-        stretched = resample_pcm16(pcm, sample_rate, INPUT_RATE)
+        gained = autogain_pcm16(pcm)
+        now = time.monotonic()
+        if now - self._last_mic_log >= 2:
+            self._last_mic_log = now
+            print(
+                f"schoolbook: mic rms={pcm16_rms(pcm):.0f} send={pcm16_rms(gained):.0f}",
+                file=sys.stderr,
+            )
+        stretched = resample_pcm16(gained, sample_rate, INPUT_RATE)
         payload = self.mapper.append_audio(base64.b64encode(stretched).decode("ascii"))
         await self._socket.send(json.dumps(payload))
 
@@ -1269,7 +1411,7 @@ class RealtimeTalk:
         for outgoing in outbound:
             await self._send_outgoing(outgoing)
 
-    async def add_system_note(self, text: str) -> None:
+    async def add_system_note(self, text: str, *, speak: bool = False) -> None:
         if self._socket is None or not text.strip():
             return
         await self._socket.send(
@@ -1284,6 +1426,8 @@ class RealtimeTalk:
                 }
             )
         )
+        if speak:
+            await self._socket.send(json.dumps({"type": "response.create"}))
 
     async def _send_outgoing(self, outgoing: dict[str, object]) -> None:
         kind = str(outgoing.get("type", ""))
@@ -1316,7 +1460,8 @@ class RealtimeTalk:
             socket = self._socket
             try:
                 raw = await socket.recv()
-            except Exception:
+            except Exception as exc:
+                print(f"schoolbook: realtime pump stopped ({exc})", file=sys.stderr)
                 if self._socket is not None and self._socket is not socket:
                     continue
                 return
@@ -1328,6 +1473,17 @@ class RealtimeTalk:
                 continue
             if not isinstance(event, dict):
                 continue
+            kind = str(event.get("type", ""))
+            if kind in {
+                "input_audio_buffer.speech_started",
+                "input_audio_buffer.speech_stopped",
+                "conversation.item.input_audio_transcription.completed",
+                "conversation.item.input_audio_transcription.failed",
+                "error",
+                "response.done",
+            }:
+                extra = event.get("transcript") or event.get("error") or ""
+                print(f"schoolbook: realtime {kind} {extra}".strip(), file=sys.stderr)
             ui, outbound = self.mapper.handle(event, execute=self.execute)
             for message in ui:
                 await emit(message)

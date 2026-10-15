@@ -13,7 +13,13 @@ from pathlib import Path
 
 from schoolbookd.content.apps import AppManifest, build_argv
 from schoolbookd.content.catalog import VideoCatalog
-from schoolbookd.content.pictures import PictureMaker, picture_id, picture_prompt, picture_suffix
+from schoolbookd.content.pictures import (
+    PictureMaker,
+    looks_prompt,
+    picture_id,
+    picture_prompt,
+    picture_suffix,
+)
 from schoolbookd.content.playback import pause_allowed, split_summary
 from schoolbookd.db.models import ImageRow, Video
 from schoolbookd.db.store import Store
@@ -57,6 +63,7 @@ class Runtime:
     notifier: Notifier | None = None
     min_video_pause_s: float = 120
     pictures: PictureMaker | None = None
+    scenes: PictureMaker | None = None
     images_dir: Path | None = None
     launcher: Callable[[list[str]], int] | None = None
     killer: Callable[[int], None] | None = None
@@ -79,16 +86,34 @@ class Runtime:
         path = Path(row.path)
         return path if path.is_file() else None
 
-    def finish_picture(self, live: LiveState, topic: str, image_id: str) -> dict[str, object]:
-        if self.pictures is None or self.images_dir is None:
+    def finish_picture(
+        self,
+        live: LiveState,
+        topic: str,
+        image_id: str,
+        *,
+        kind: str = "diagram",
+    ) -> dict[str, object]:
+        maker = self._picture_maker(kind)
+        if maker is None or self.images_dir is None:
             return {"error": "pictures are not ready"}
         self.images_dir.mkdir(parents=True, exist_ok=True)
         path = self.image_path(image_id)
         if path is None:
-            path = self._save_picture(image_id, self.pictures.generate(picture_prompt(topic)))
+            path = self._save_picture(image_id, maker.generate(self._picture_prompt(kind, topic)))
         self.store.add_image(image_id, str(path), topic, "generated", "generated")
         live.screen = "board"
         return {"shown": True, "image_id": image_id}
+
+    def _picture_maker(self, kind: str) -> PictureMaker | None:
+        if kind == "looks":
+            return self.scenes or self.pictures
+        return self.pictures or self.scenes
+
+    def _picture_prompt(self, kind: str, brief: str) -> str:
+        if kind == "looks":
+            return looks_prompt(brief)
+        return picture_prompt(brief)
 
     def _save_picture(self, image_id: str, data: bytes) -> Path:
         assert self.images_dir is not None
@@ -308,7 +333,9 @@ class Runtime:
             live.screen = "board"
             return {"shown": True}
         if name == "show_picture":
-            if self.pictures is None or self.images_dir is None:
+            kind = str(args.get("kind") or "diagram")
+            maker = self._picture_maker(kind)
+            if maker is None or self.images_dir is None:
                 return {"error": "pictures are not ready"}
             topic = str(args.get("topic") or args.get("brief") or "").strip()
             brief = str(args.get("brief") or topic).strip()
@@ -316,9 +343,15 @@ class Runtime:
             self.images_dir.mkdir(parents=True, exist_ok=True)
             path = self.image_path(image_id)
             if path is None and defer_pictures:
-                return {"loading": True, "image_id": image_id, "topic": topic, "brief": brief}
+                return {
+                    "loading": True,
+                    "image_id": image_id,
+                    "topic": topic,
+                    "brief": brief,
+                    "kind": kind,
+                }
             if path is None:
-                path = self._save_picture(image_id, self.pictures.generate(picture_prompt(brief)))
+                path = self._save_picture(image_id, maker.generate(self._picture_prompt(kind, brief)))
             self.store.add_image(image_id, str(path), topic, "generated", "generated")
             live.screen = "board"
             return {"shown": True, "image_id": image_id}

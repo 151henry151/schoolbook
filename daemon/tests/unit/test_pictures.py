@@ -5,7 +5,13 @@ from pathlib import Path
 
 import httpx
 
-from schoolbookd.content.pictures import TINY_PNG, FakePictures, picture_id, picture_prompt
+from schoolbookd.content.pictures import (
+    TINY_PNG,
+    FakePictures,
+    looks_prompt,
+    picture_id,
+    picture_prompt,
+)
 from schoolbookd.db.engine import make_engine, migrate, session_factory
 from schoolbookd.db.store import Store
 from schoolbookd.policy.output_check import OutputCheck
@@ -57,6 +63,18 @@ def test_picture_prompt_leaves_room_for_non_size_questions() -> None:
     assert "magma" in lowered
     assert "judgment" in lowered or "choose" in lowered or "best way" in lowered
     assert "stacked houses" not in lowered
+
+
+def test_looks_prompt_asks_for_how_it_looks_not_a_diagram() -> None:
+    text = looks_prompt("how people imagine a huge ocean creature")
+    lowered = text.lower()
+    assert "how people imagine" in lowered
+    assert "six" in lowered or "child" in lowered
+    assert "look" in lowered or "paint" in lowered or "picture" in lowered
+    assert "svg" not in lowered
+    assert "diagram" not in lowered or "not a diagram" in lowered
+    assert "story" in lowered or "legend" in lowered or "imagine" in lowered
+    assert "text" in lowered or "letters" in lowered
 
 
 def test_picture_id_is_a_short_slug() -> None:
@@ -121,6 +139,66 @@ def test_deferred_show_picture_returns_loading_then_saves(tmp_path: Path) -> Non
     path = runtime.image_path("shark-depth")
     assert path is not None
     assert path.read_bytes() == TINY_PNG
+
+
+def test_show_picture_kind_looks_uses_the_scene_maker(tmp_path: Path) -> None:
+    store = _store(tmp_path)
+    diagrams = FakePictures()
+    scenes = FakePictures()
+    runtime = Runtime(
+        store=store,
+        llm=FakeLLM([]),
+        tts=FakeTTS(),
+        output_check=OutputCheck([]),
+        apps={},
+        age_profile=AgeProfile(id="age-6"),
+        core_prompt="computer helper",
+        pictures=diagrams,
+        scenes=scenes,
+        images_dir=tmp_path / "images",
+    )
+    live = LiveState(session_id=store.start_session("kid", "fake"), learner_id="kid")
+    brief = "Draw how people imagine the creature, as a story picture."
+    result = runtime.run_tool(
+        live,
+        "show_picture",
+        {"topic": "ocean legend", "brief": brief, "kind": "looks"},
+    )
+    assert result["shown"] is True
+    assert scenes.prompts
+    assert diagrams.prompts == []
+    sent = scenes.prompts[-1].lower()
+    assert "imagine" in sent
+    assert "svg" not in sent
+
+
+def test_show_picture_kind_diagram_uses_the_diagram_maker(tmp_path: Path) -> None:
+    store = _store(tmp_path)
+    diagrams = FakePictures()
+    scenes = FakePictures()
+    runtime = Runtime(
+        store=store,
+        llm=FakeLLM([]),
+        tts=FakeTTS(),
+        output_check=OutputCheck([]),
+        apps={},
+        age_profile=AgeProfile(id="age-6"),
+        core_prompt="computer helper",
+        pictures=diagrams,
+        scenes=scenes,
+        images_dir=tmp_path / "images",
+    )
+    live = LiveState(session_id=store.start_session("kid", "fake"), learner_id="kid")
+    brief = "Show how gears turn each other."
+    result = runtime.run_tool(
+        live,
+        "show_picture",
+        {"topic": "gears", "brief": brief, "kind": "diagram"},
+    )
+    assert result["shown"] is True
+    assert diagrams.prompts
+    assert scenes.prompts == []
+    assert "svg" in diagrams.prompts[-1].lower()
 
 
 def test_show_picture_sends_the_tutor_brief_to_the_picture_maker(tmp_path: Path) -> None:

@@ -19,10 +19,35 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `schoolbook` command that starts the daemon and a cage Chromium kiosk from one binary
 - Launcher loads a gitignored `.env` for API keys without overwriting the process environment
 - Kiosk launch falls back to Chromium without cage when the compositor is missing
+- Find `schoolbook-session` next to the venv Python when it is not on PATH
+- Disable Chromium GPU and use X11 on old graphics when `SCHOOLBOOK_DISABLE_GPU=1`
+- Start Openbox under X11 so Chromium can paint the child UI on old Intel graphics
+- Ignore a failed Wi-Fi probe so a missing NetworkManager does not put the tutor to rest
+- Show a crossed microphone when capture fails instead of the listening ear
+- Start a session D-Bus bus so PipeWire can keep the Pulse socket for Chromium
+- Keep the X11 session shell so PipeWire is not hung up when Schoolbook starts
+- Put PipeWire Pulse sockets outside `/run/user/0` so a root systemd user session cannot delete them
+- Point Pulse clients at that socket from `~/.config/pulse/client.conf` so Chromium still finds the mic after it clears the environment
+- Prefer the analog input over the speaker monitor so Chromium captures the microphone
+- Remap the analog input to `schoolbook-mic` so Pulse keeps it as the default source
+- Skip speaker-monitor capture devices when opening the microphone
+- Disable browser echo cancellation so a quiet laptop microphone is not suppressed
+- Raise analog capture gain and amplify quiet PCM before sending it to Realtime
+- Boost only quiet microphone frames so a loud external mic is not clipped
+- Leave room-noise frames unboosted so Realtime VAD can hear a new turn
+- Return to listening and clear the input buffer when a turn transcribes as empty
+- Turn speaker and Pulse output volume up to 100% on kiosk start
+- Lower Realtime voice-activity threshold so a quiet microphone can start a turn
+- Show the listening ear when the child taps the avatar even if the tutor already started speaking
+- Ignore leftover tutor speech while the home screen is showing
+- Pass Chromium `--no-sandbox` when the kiosk runs as root
 - Cage uses the X11 backend on Xorg sessions instead of a missing Wayland nest
 - Desktop X11/Wayland sessions skip nested cage and start Chromium kiosk directly
 - Session-agent `kiosk` mode that launches localhost Chromium `--kiosk` and restarts it after a crash
 - Parent End session writes a kiosk exit flag so cage returns to the previous session
+- Child Wi-Fi picker that lists nearby networks and joins one with a password
+- Parent menu Wi-Fi action for changing networks after unlock
+- Kiosk boot helper that hides GRUB, prefers Debian 13, and starts Schoolbook without a login
 
 ### Changed
 
@@ -83,6 +108,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Stop tutor speech when a GCompris game starts
 - Show a floating red X over GCompris so the child can leave the game
 - Copy updated app manifests into an existing runtime on later Schoolbook starts
+- Draw size and how-it-works pictures as Claude diagrams, and how-it-looks pictures with OpenAI image generation
+- Teach the real origin of a legend or story creature, then show how people imagine it and say it is a story
+- Close a video when it ends, turn the microphone back on, and have the tutor invite a question or something else
 
 ## [0.9.0] - 2026-10-07
 

@@ -10,6 +10,7 @@ import { PlaybackQueue, decodePcm16, webAudioPlayer } from "./playback";
 import { createVad, encodePcm16 } from "./pcm";
 import { PROTOCOL_MAJOR, type BoardElement } from "./protocol";
 import { ParentUnlock } from "./unlock";
+import { WifiSetup } from "./wifi";
 import { TalkLines, nextTalkPair, playbackWordIndex, type TalkPair } from "./talkLines";
 import { PictureOverlay } from "./picture";
 import { TalkStatus, type TalkStatusKind } from "./talkStatus";
@@ -21,6 +22,7 @@ type Choice = { id: string; label: string };
 
 export function App() {
   const [phase, setPhase] = useState<Phase>("home");
+  const phaseRef = useRef<Phase>("home");
   const [name, setName] = useState("friend");
   const [talk, setTalk] = useState<TalkPair>({ child: "", tutor: "" });
   const [spokenIndex, setSpokenIndex] = useState(-1);
@@ -46,6 +48,7 @@ export function App() {
   const [status, setStatus] = useState<TalkStatusKind>("listening");
   const [listenPaused, setListenPaused] = useState(false);
   const listenPausedRef = useRef(false);
+  const [micEpoch, setMicEpoch] = useState(0);
   const [voice, setVoice] = useState("pipeline");
   const voiceRef = useRef("pipeline");
   const holdStarted = useRef<number | null>(null);
@@ -58,6 +61,10 @@ export function App() {
   const capture = useRef<AudioContext | null>(null);
   const vad = useRef(createVad());
   const dev = new URLSearchParams(window.location.search).has("dev");
+
+  useEffect(() => {
+    phaseRef.current = phase;
+  }, [phase]);
 
   useEffect(() => {
     socketRef.current = socket;
@@ -76,6 +83,15 @@ export function App() {
       setSpokenIndex(playbackWordIndex(talkRef.current.tutor, elapsed, duration));
     });
     return () => queue.current.setProgress(null);
+  }, []);
+
+  useEffect(() => {
+    void fetch("/wifi")
+      .then((response) => (response.ok ? response.json() : Promise.reject(new Error("wifi"))))
+      .then((body: { online?: boolean; networks?: unknown }) => {
+        if (body.online === false && Array.isArray(body.networks)) setOffline(true);
+      })
+      .catch(() => {});
   }, []);
 
   useEffect(() => {
@@ -119,6 +135,7 @@ export function App() {
         if (message.type === "transcript" && message.text) {
           if (message.role === "child" && message.partial) return;
           if (freshListen.current && message.role === "tutor") return;
+          if (phaseRef.current !== "talk" && message.role === "tutor") return;
           setTalk((current) => nextTalkPair(current, message.role ?? "", message.text ?? ""));
           if (message.role === "tutor") {
             speaking.current = true;
@@ -126,6 +143,7 @@ export function App() {
           }
         }
         if (message.type === "audio_chunk" && message.turn_id && message.pcm_b64) {
+          if (phaseRef.current !== "talk") return;
           if (freshListen.current || appIdRef.current) return;
           speaking.current = true;
           setStatus("talking");
@@ -209,6 +227,7 @@ export function App() {
         if (message.type === "state" && message.name === "parent_unlock") setUnlock(true);
         if (message.type === "state" && message.name === "thinking") setStatus("thinking");
         if (message.type === "state" && message.name === "speaking") {
+          if (phaseRef.current !== "talk") return;
           if (freshListen.current || listenPausedRef.current) return;
           speaking.current = true;
           setStatus("talking");
@@ -305,10 +324,20 @@ export function App() {
         setStatus("mic-error");
       });
     return () => stop?.();
-  }, [phase, voice, videoId, videoPaused, listenPaused, appId]);
+  }, [phase, voice, videoId, videoPaused, listenPaused, appId, micEpoch]);
 
   function send(message: object) {
     socket?.send(JSON.stringify(message));
+  }
+
+  function closePlayer(action: "done" | "ended") {
+    pictureLoadingRef.current = false;
+    setPictureLoading(false);
+    setPictureId("");
+    setVideoPaused(false);
+    setVideoAudioOnly(false);
+    setVideoId("");
+    send({ type: "video_ui", action });
   }
 
   function resetListen() {
@@ -324,6 +353,7 @@ export function App() {
     setListenPaused(false);
     setSpokenIndex(-1);
     setStatus("listening");
+    setMicEpoch((n) => n + 1);
     send({ type: "talk_start", turn_id: crypto.randomUUID() });
   }
 
@@ -352,6 +382,7 @@ export function App() {
   if (phase === "home") {
     return (
       <main className="home">
+        {offline ? <WifiSetup token={token} /> : null}
         <button
           type="button"
           className="avatar"
@@ -365,6 +396,7 @@ export function App() {
             } catch {
               capture.current = null;
             }
+            resetListen();
             setPhase("talk");
           }}
         >
@@ -415,6 +447,7 @@ export function App() {
       {offline ? (
         <section aria-label="offline apps">
           <p>The tutor is resting.</p>
+          <WifiSetup token={token} />
           {OFFLINE_APPS.map((app) => (
             <button key={app} type="button">
               {app}
@@ -526,15 +559,8 @@ export function App() {
           paused={videoPaused}
           audioOnly={videoAudioOnly}
           hidden={Boolean(pictureId || pictureLoading)}
-          onClose={() => {
-            pictureLoadingRef.current = false;
-            setPictureLoading(false);
-            setPictureId("");
-            setVideoPaused(false);
-            setVideoAudioOnly(false);
-            setVideoId("");
-            send({ type: "video_ui", action: "done" });
-          }}
+          onClose={() => closePlayer("done")}
+          onEnded={() => closePlayer("ended")}
           onPausedChange={(paused) => {
             setVideoPaused(paused);
             send({ type: "video_ui", action: paused ? "pause" : "resume" });

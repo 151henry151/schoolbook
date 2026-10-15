@@ -39,6 +39,7 @@ from schoolbookd.db.models import (
     Turn,
     Video,
 )
+from schoolbookd.net.wifi import Wifi, WifiError
 from schoolbookd.policy.unlock import UnlockState, attempt_unlock, hash_password
 from schoolbookd.providers.base import STTProvider
 from schoolbookd.providers.openai_realtime import (
@@ -46,6 +47,7 @@ from schoolbookd.providers.openai_realtime import (
     REALTIME_TOOLS,
     RealtimeMapper,
     RealtimeTalk,
+    finished_video_note,
     paused_video_note,
     preferred_tutor_voice,
     spoken_child_instructions,
@@ -109,6 +111,7 @@ class Host:
     picture_emit: Callable[[dict[str, object]], Awaitable[None]] | None = None
     picture_talk: RealtimeTalk | None = None
     song_audio: Callable[[str], tuple[bytes, str]] | None = None
+    wifi: Wifi | None = None
 
     def request_kiosk_end(self) -> None:
         if self.data_dir is None:
@@ -209,7 +212,8 @@ class Host:
             result = self.runtime.run_tool(self.ensure_live(), tool, args, defer_pictures=True)
             if result.get("loading") and result.get("image_id"):
                 brief = str(result.get("brief") or result.get("topic") or "")
-                loop.create_task(self.complete_picture(brief, str(result["image_id"])))
+                kind = str(result.get("kind") or "diagram")
+                loop.create_task(self.complete_picture(brief, str(result["image_id"]), kind))
             return result
 
         return RealtimeTalk(
@@ -222,9 +226,15 @@ class Host:
             tutor_name=tutor_name,
         )
 
-    async def complete_picture(self, topic: str, image_id: str) -> None:
+    async def complete_picture(self, topic: str, image_id: str, kind: str = "diagram") -> None:
         try:
-            done = await asyncio.to_thread(self.runtime.finish_picture, self.ensure_live(), topic, image_id)
+            done = await asyncio.to_thread(
+                self.runtime.finish_picture,
+                self.ensure_live(),
+                topic,
+                image_id,
+                kind=kind,
+            )
         except Exception as exc:
             print(f"schoolbook: picture failed ({exc})", file=sys.stderr)
             emit = self.picture_emit
@@ -268,6 +278,50 @@ def child_app(host: Host) -> FastAPI:
     @app.get("/health")
     def health() -> dict[str, str]:
         return {"status": "ok"}
+
+    def _wifi() -> Wifi:
+        return host.wifi if host.wifi is not None else Wifi()
+
+    def _wifi_payload(wifi: Wifi) -> dict[str, object]:
+        status = wifi.status()
+        return {
+            "connected": status.connected,
+            "ssid": status.ssid,
+            "online": status.online,
+            "networks": [
+                {"ssid": net.ssid, "signal": net.signal, "secured": net.secured}
+                for net in wifi.networks()
+            ],
+        }
+
+    @app.get("/wifi")
+    def wifi_status() -> JSONResponse:
+        try:
+            return JSONResponse(_wifi_payload(_wifi()))
+        except WifiError as exc:
+            return JSONResponse(
+                {
+                    "error": str(exc),
+                    "connected": False,
+                    "ssid": None,
+                    "online": False,
+                    "networks": [],
+                },
+                status_code=503,
+            )
+
+    @app.post("/wifi/connect")
+    def wifi_connect(body: dict[str, str], request: Request) -> JSONResponse:
+        if request.headers.get("x-schoolbook-token") != host.token:
+            return JSONResponse({"error": "bad token"}, status_code=401)
+        wifi = _wifi()
+        try:
+            wifi.connect(str(body.get("ssid", "")), str(body.get("password", "")))
+            payload = _wifi_payload(wifi)
+        except WifiError as exc:
+            return JSONResponse({"error": str(exc)}, status_code=400)
+        payload["ok"] = True
+        return JSONResponse(payload)
 
     @app.get("/token")
     def token() -> dict[str, str]:
@@ -454,15 +508,17 @@ def child_app(host: Host) -> FastAPI:
                             await socket.send_json(message)
                 elif incoming.type == "video_ui":
                     live = host.ensure_live()
-                    if incoming.action == "done":
+                    if incoming.action in {"done", "ended"}:
                         live.playing_video = None
                         live.screen = "home"
                     if talk is not None and incoming.action == "pause":
                         await talk.add_system_note(paused_video_note())
+                    if talk is not None and incoming.action == "ended":
+                        await talk.add_system_note(finished_video_note(), speak=True)
                     await socket.send_json(
                         {
                             "type": "video",
-                            "action": "stop" if incoming.action == "done" else incoming.action,
+                            "action": "stop" if incoming.action in {"done", "ended"} else incoming.action,
                             "video_id": "",
                             "start_s": None,
                             "end_s": None,

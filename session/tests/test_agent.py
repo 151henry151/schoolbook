@@ -42,6 +42,25 @@ def test_chromium_stays_on_localhost() -> None:
         chromium_kiosk_argv("https://example.com")
 
 
+def test_chromium_can_drop_the_gpu_on_old_graphics(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("SCHOOLBOOK_DISABLE_GPU", "1")
+    monkeypatch.setenv("DISPLAY", ":0")
+    monkeypatch.delenv("WAYLAND_DISPLAY", raising=False)
+    argv = chromium_kiosk_argv("http://127.0.0.1:8765/")
+    assert "--disable-gpu" in argv
+    assert "--disable-gpu-rasterization" in argv
+    assert "--disable-dev-shm-usage" in argv
+    assert "--ozone-platform=x11" in argv
+    assert argv[-1] == "http://127.0.0.1:8765/"
+
+
+def test_chromium_adds_no_sandbox_when_running_as_root(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr("schoolbook_session.agent.os.geteuid", lambda: 0)
+    argv = chromium_kiosk_argv("http://127.0.0.1:8765/")
+    assert "--no-sandbox" in argv
+    assert "--disable-setuid-sandbox" in argv
+
+
 def test_handle_line_reports_app_started() -> None:
     result = handle_line(
         json.dumps({"type": "launch", "app_id": "gcompris", "argv": ["gcompris-qt", "-f"]}),

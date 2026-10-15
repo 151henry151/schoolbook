@@ -227,7 +227,10 @@ def _upgrade_voice_providers(config_path: Path) -> None:
         config_path.write_text(yaml.safe_dump(raw, sort_keys=False), encoding="utf-8")
 
 
-def _which(name: str) -> str:
+def find_command(name: str) -> str:
+    sibling = Path(sys.executable).resolve().parent / name
+    if sibling.is_file() and os.access(sibling, os.X_OK):
+        return str(sibling)
     found = shutil.which(name)
     if not found:
         raise LaunchError(f"{name} is not installed")
@@ -250,7 +253,7 @@ def main(argv: list[str] | None = None) -> int:
         load_env_file(share / ".env")
         load_env_file(Path.home() / ".config" / "schoolbook" / "env")
         require_ui(share)
-        session = _which("schoolbook-session")
+        session = find_command("schoolbook-session")
         cage_bin = shutil.which("cage")
         cage = cage_bin if cage_bin and should_use_cage() else None
         if cage_bin and cage is None:

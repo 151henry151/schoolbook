@@ -41,6 +41,12 @@ def test_daemon_board_roundtrip() -> None:
     assert message.elements[0].type == "big_text"
 
 
+def test_client_can_report_a_video_ended() -> None:
+    message = parse_client_message({"type": "video_ui", "action": "ended"})
+    assert message.type == "video_ui"
+    assert message.action == "ended"
+
+
 def test_client_can_close_a_running_app() -> None:
     message = parse_client_message({"type": "app_ui", "action": "done"})
     assert message.type == "app_ui"
@@ -87,3 +93,4 @@ def test_typescript_mentions_major() -> None:
     assert 'type: "show_board"' not in rendered
     assert "dev_text" in rendered
     assert "app_ui" in rendered
+    assert '"ended"' in rendered

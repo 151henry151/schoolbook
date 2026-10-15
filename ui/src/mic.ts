@@ -50,12 +50,34 @@ function attachScriptProcessor(
   };
 }
 
+export function isSpeakerMonitor(label: string): boolean {
+  return /monitor/i.test(label);
+}
+
+export function pickCaptureDeviceId(
+  devices: Array<{ kind: string; deviceId: string; label: string }>,
+): string | undefined {
+  const inputs = devices.filter((device) => device.kind === "audioinput" && device.deviceId);
+  const named = inputs.find((device) => device.label && !isSpeakerMonitor(device.label));
+  if (named) return named.deviceId;
+  return inputs.find((device) => !isSpeakerMonitor(device.label))?.deviceId;
+}
+
 export async function startMic(
   onFrame: (pcm: Int16Array, dtMs: number) => void,
   audio?: AudioContext,
 ): Promise<() => void> {
+  const devices = (await navigator.mediaDevices.enumerateDevices?.()) ?? [];
+  const deviceId = pickCaptureDeviceId(devices);
+  const audioConstraints: MediaTrackConstraints = {
+    echoCancellation: false,
+    noiseSuppression: false,
+    channelCount: 1,
+    autoGainControl: true,
+  };
+  if (deviceId) audioConstraints.deviceId = { ideal: deviceId };
   const stream = await navigator.mediaDevices.getUserMedia({
-    audio: { echoCancellation: true, noiseSuppression: false, channelCount: 1 },
+    audio: audioConstraints,
   });
   const context = audio ?? createCaptureContext();
   if (context.state === "suspended") await context.resume();

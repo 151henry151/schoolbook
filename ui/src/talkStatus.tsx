@@ -14,7 +14,21 @@ export function TalkStatus({
   const label = kind === "thinking" ? "thinking" : kind === "mic-error" ? "I cannot hear the microphone" : "listening";
   return (
     <div className={overVideo ? "status in-controls on-video" : "status in-controls"} role="status" aria-label={label}>
-      {kind === "thinking" ? (
+      {kind === "mic-error" ? (
+        <span className="status-mic-error" role="img" aria-label="I cannot hear the microphone">
+          <svg viewBox="0 0 64 64" aria-hidden="true">
+            <rect x="24" y="8" width="16" height="28" rx="8" fill="#d12c2c" />
+            <path
+              d="M18 30a14 14 0 0 0 28 0"
+              fill="none"
+              stroke="#d12c2c"
+              strokeWidth="5"
+              strokeLinecap="round"
+            />
+            <path d="M14 14 L50 50" fill="none" stroke="#d12c2c" strokeWidth="6" strokeLinecap="round" />
+          </svg>
+        </span>
+      ) : kind === "thinking" ? (
         <span className="status-brain" role="img" aria-label="thinking">
           <svg viewBox="0 0 64 64" aria-hidden="true">
             <path

@@ -25,7 +25,7 @@ if [[ "$DRY_RUN" != "1" && "${EUID}" -ne 0 ]]; then
   exit 1
 fi
 
-say "install packages: greetd cage chromium pipewire grim piper gcompris tuxpaint kturtle stellarium marble"
+say "install packages: greetd cage chromium pipewire grim piper gcompris tuxpaint kturtle stellarium marble network-manager"
 say "create schoolbook system user and kid account in audio, video, and schoolbook-ui"
 run id schoolbook >/dev/null 2>&1 || run useradd --system --home /var/lib/schoolbook --shell /usr/sbin/nologin schoolbook
 run id kid >/dev/null 2>&1 || run useradd --create-home --groups audio,video --shell /usr/sbin/nologin kid
@@ -36,6 +36,8 @@ say "install chromium managed policy with URLBlocklist and DeveloperToolsAvailab
 say "install xdg-open stub for kid"
 say "install polkit rule denying udisks mounts for kid"
 say "install greetd autologin cage without -s"
+say "install a child Wi-Fi picker for guest networks"
+say "hide the GRUB menu and boot the kiosk OS first"
 say "offer Xorg and Openbox fallback when Wayland misbehaves"
 say "ask disk encryption: tpm, partial, or none"
 say "prompt for the parent password, child first name, birth year, Anthropic key, YouTube key, STT, and TTS"

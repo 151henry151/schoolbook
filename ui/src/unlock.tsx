@@ -2,10 +2,12 @@
 // SPDX-FileCopyrightText: 2026 Schoolbook contributors
 
 import { useState, type FormEvent } from "react";
+import { WifiSetup } from "./wifi";
 
 export function ParentUnlock({ token }: { token: string }) {
   const [password, setPassword] = useState("");
   const [menu, setMenu] = useState(false);
+  const [wifi, setWifi] = useState(false);
   const [error, setError] = useState("");
 
   async function unlock(event: FormEvent) {
@@ -30,9 +32,23 @@ export function ParentUnlock({ token }: { token: string }) {
     });
   }
 
+  if (wifi) {
+    return (
+      <div className="unlock">
+        <WifiSetup token={token} />
+        <button type="button" onClick={() => setWifi(false)}>
+          Back
+        </button>
+      </div>
+    );
+  }
+
   if (menu) {
     return (
       <nav className="unlock" aria-label="parent menu">
+        <button type="button" onClick={() => setWifi(true)}>
+          Wi-Fi
+        </button>
         <button type="button" onClick={() => void endSession()}>
           End session
         </button>

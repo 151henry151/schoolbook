@@ -9,6 +9,7 @@ from schoolbookd.launch import (
     LaunchError,
     build_plan,
     cage_env,
+    find_command,
     kiosk_command,
     load_env_file,
     prepare_runtime,
@@ -104,6 +105,20 @@ def test_kiosk_plan_wraps_the_session_in_cage() -> None:
     assert "--data-dir" in plan.cage_cmd
 
 
+def test_cage_env_keeps_pulse_sockets_for_chromium() -> None:
+    env = cage_env(
+        {
+            "DISPLAY": ":0",
+            "PULSE_SERVER": "unix:/tmp/schoolbook-audio/pulse/native",
+            "PULSE_RUNTIME_PATH": "/tmp/schoolbook-audio/pulse",
+            "PIPEWIRE_RUNTIME_DIR": "/tmp/schoolbook-audio",
+        }
+    )
+    assert env["PULSE_SERVER"] == "unix:/tmp/schoolbook-audio/pulse/native"
+    assert env["PULSE_RUNTIME_PATH"] == "/tmp/schoolbook-audio/pulse"
+    assert env["PIPEWIRE_RUNTIME_DIR"] == "/tmp/schoolbook-audio"
+
+
 def test_cage_env_uses_x11_when_only_display_is_set(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.delenv("WAYLAND_DISPLAY", raising=False)
     env = cage_env({"DISPLAY": ":0"})
@@ -146,3 +161,23 @@ def test_kiosk_command_falls_back_to_the_session_without_cage() -> None:
 def test_require_ui_refuses_a_missing_child_build(tmp_path: Path) -> None:
     with pytest.raises(LaunchError, match="ui/dist"):
         require_ui(tmp_path)
+
+
+def test_find_command_uses_the_venv_bin_next_to_python(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    bindir = tmp_path / "bin"
+    bindir.mkdir()
+    sibling = bindir / "schoolbook-session"
+    sibling.write_text("#!/bin/sh\n", encoding="utf-8")
+    sibling.chmod(0o755)
+    monkeypatch.setattr("schoolbookd.launch.sys.executable", str(bindir / "python"))
+    monkeypatch.setattr("schoolbookd.launch.shutil.which", lambda _name: None)
+    assert find_command("schoolbook-session") == str(sibling)
+
+
+def test_find_command_refuses_a_missing_session(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    monkeypatch.setattr("schoolbookd.launch.sys.executable", str(tmp_path / "python"))
+    monkeypatch.setattr("schoolbookd.launch.shutil.which", lambda _name: None)
+    with pytest.raises(LaunchError, match="schoolbook-session"):
+        find_command("schoolbook-session")

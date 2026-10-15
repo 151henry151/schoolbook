@@ -135,6 +135,9 @@ class ToolPolicy:
         brief = args.get("brief", topic)
         if not isinstance(brief, str) or not brief.strip() or len(brief) > 1200:
             return Decision(False, "picture brief must be short directions")
+        kind = args.get("kind", "diagram")
+        if kind not in {"diagram", "looks"}:
+            return Decision(False, "picture kind must be diagram or looks")
         return Decision(True, "ok")
 
     def _check_set_tutor_name(self, args: dict[str, object], ctx: PolicyContext) -> Decision:

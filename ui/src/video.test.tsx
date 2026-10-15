@@ -107,6 +107,40 @@ test("a paused video keeps the cursor visible", () => {
   expect(screen.getByLabelText("video").className).not.toContain("cursor-idle");
 });
 
+test("the overlay closes when the youtube player ends", () => {
+  const closed = vi.fn();
+  render(<VideoOverlay videoId="abcdefghijk" onClose={closed} />);
+  act(() => {
+    window.dispatchEvent(
+      new MessageEvent("message", {
+        origin: "https://www.youtube-nocookie.com",
+        data: JSON.stringify({ event: "infoDelivery", info: { playerState: 0 } }),
+      }),
+    );
+  });
+  expect(closed).toHaveBeenCalledOnce();
+});
+
+test("a playing or paused youtube state does not close the overlay", () => {
+  const closed = vi.fn();
+  render(<VideoOverlay videoId="abcdefghijk" onClose={closed} />);
+  act(() => {
+    window.dispatchEvent(
+      new MessageEvent("message", {
+        origin: "https://www.youtube-nocookie.com",
+        data: JSON.stringify({ event: "infoDelivery", info: { playerState: 1 } }),
+      }),
+    );
+    window.dispatchEvent(
+      new MessageEvent("message", {
+        origin: "https://www.youtube-nocookie.com",
+        data: { event: "onStateChange", info: 2 },
+      }),
+    );
+  });
+  expect(closed).not.toHaveBeenCalled();
+});
+
 test("playerCommand posts a YouTube iframe command", () => {
   const target = { postMessage: vi.fn() };
   playerCommand(target, "pauseVideo");

@@ -2,7 +2,15 @@
 // SPDX-FileCopyrightText: 2026 Schoolbook contributors
 
 import { useEffect, useRef, useState } from "react";
-import { embedUrl, playerCommand, songUrl, startEmbeddedPlayer, youtubePlayerReady, type PlayerTarget } from "./capture";
+import {
+  embedUrl,
+  playerCommand,
+  songUrl,
+  startEmbeddedPlayer,
+  youtubePlayerEnded,
+  youtubePlayerReady,
+  type PlayerTarget,
+} from "./capture";
 import { hideVideoCursor, VIDEO_CURSOR_IDLE_MS } from "./cursor";
 
 export function VideoOverlay({
@@ -11,6 +19,7 @@ export function VideoOverlay({
   hidden = false,
   audioOnly = false,
   onClose,
+  onEnded,
   onPausedChange,
   player,
 }: {
@@ -19,13 +28,22 @@ export function VideoOverlay({
   hidden?: boolean;
   audioOnly?: boolean;
   onClose: () => void;
+  onEnded?: () => void;
   onPausedChange?: (paused: boolean) => void;
   player?: PlayerTarget;
 }) {
   const frame = useRef<HTMLIFrameElement>(null);
   const audio = useRef<HTMLAudioElement>(null);
+  const finished = useRef(false);
   const [localPaused, setLocalPaused] = useState(paused);
   const [idle, setIdle] = useState(!paused);
+
+  function finish(reason: "close" | "ended") {
+    if (finished.current) return;
+    finished.current = true;
+    if (reason === "ended") (onEnded ?? onClose)();
+    else onClose();
+  }
 
   useEffect(() => {
     if (audioOnly) return;
@@ -42,6 +60,10 @@ export function VideoOverlay({
     if (audioOnly) return;
     function onMessage(event: MessageEvent) {
       if (event.origin && event.origin !== "https://www.youtube-nocookie.com") return;
+      if (youtubePlayerEnded(event.data)) {
+        finish("ended");
+        return;
+      }
       if (!youtubePlayerReady(event.data)) return;
       startEmbeddedPlayer(player ?? frame.current?.contentWindow ?? undefined);
     }
@@ -56,7 +78,7 @@ export function VideoOverlay({
       const node = audio.current;
       if (!node) return;
       if (paused) node.pause();
-      else void node.play().catch(() => {});
+      else void Promise.resolve(node.play()).catch(() => {});
       return;
     }
     const target = player ?? frame.current?.contentWindow ?? undefined;
@@ -74,7 +96,7 @@ export function VideoOverlay({
     if (audioOnly) {
       const node = audio.current;
       if (localPaused) {
-        void node?.play().catch(() => {});
+        void Promise.resolve(node?.play()).catch(() => {});
         setLocalPaused(false);
         onPausedChange?.(false);
       } else {
@@ -112,7 +134,7 @@ export function VideoOverlay({
       }}
     >
       {audioOnly ? (
-        <audio ref={audio} src={songUrl(videoId)} autoPlay onEnded={onClose} />
+        <audio ref={audio} src={songUrl(videoId)} autoPlay onEnded={() => finish("ended")} />
       ) : (
         <iframe
           ref={frame}
@@ -141,7 +163,7 @@ export function VideoOverlay({
         aria-label="close video"
         onClick={(event) => {
           event.stopPropagation();
-          onClose();
+          finish("close");
         }}
       >
         ×

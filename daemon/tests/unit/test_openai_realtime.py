@@ -13,6 +13,7 @@ from schoolbookd.providers.openai_realtime import (
     clarify_speech_note,
     connect_headers,
     extract_child_speech,
+    finished_video_note,
     game_play_briefing,
     game_topic,
     looks_like_child_speech,
@@ -21,7 +22,11 @@ from schoolbookd.providers.openai_realtime import (
     maybe_song_topic,
     paused_video_note,
     picture_making_line,
+    picture_request_briefing,
     picture_wait_instructions,
+    pcm16_rms,
+    gain_pcm16,
+    autogain_pcm16,
     real_world_nudge,
     resample_pcm16,
     session_update,
@@ -34,6 +39,34 @@ from schoolbookd.providers.openai_realtime import (
 )
 
 
+def test_autogain_boosts_quiet_speech_but_leaves_loud_speech_alone() -> None:
+    quiet = (1200).to_bytes(2, "little", signed=True) * 32
+    boosted = autogain_pcm16(quiet)
+    assert pcm16_rms(boosted) > pcm16_rms(quiet) * 2
+    loud = (8000).to_bytes(2, "little", signed=True) * 32
+    assert autogain_pcm16(loud) == loud
+    hiss = (40).to_bytes(2, "little", signed=True) * 32
+    assert autogain_pcm16(hiss) == hiss
+    room = (300).to_bytes(2, "little", signed=True) * 32
+    assert autogain_pcm16(room) == room
+
+
+def test_quiet_pcm16_is_gained_without_wrapping() -> None:
+    quiet = (400).to_bytes(2, "little", signed=True) * 16
+    loud = gain_pcm16(quiet, 12)
+    samples = [int.from_bytes(loud[i : i + 2], "little", signed=True) for i in range(0, len(loud), 2)]
+    assert samples[0] == 4800
+    clipped = gain_pcm16((20000).to_bytes(2, "little", signed=True) * 4, 12)
+    assert int.from_bytes(clipped[:2], "little", signed=True) == 32767
+
+
+def test_pcm16_rms_is_zero_for_silence_and_higher_for_a_tone() -> None:
+    silence = bytes(64)
+    tone = b"".join((20000 if index % 2 == 0 else -20000).to_bytes(2, "little", signed=True) for index in range(32))
+    assert pcm16_rms(silence) == 0
+    assert pcm16_rms(tone) > 10000
+
+
 def test_session_update_disables_barge_in_and_uses_server_vad() -> None:
     payload = session_update(instructions="Be a computer helper.", tools=[{"name": "show_board"}])
     session = payload["session"]
@@ -44,7 +77,7 @@ def test_session_update_disables_barge_in_and_uses_server_vad() -> None:
     assert turn["interrupt_response"] is False
     assert turn["create_response"] is False
     assert int(turn["silence_duration_ms"]) >= 1500
-    assert float(turn["threshold"]) >= 0.55
+    assert float(turn["threshold"]) <= 0.35
     assert session["tools"][0]["name"] == "show_board"
     assert session["audio"]["output"]["voice"] == "marin"
     assert float(session["audio"]["output"]["speed"]) <= 0.9
@@ -314,6 +347,11 @@ def test_realtime_tools_do_not_offer_written_menus() -> None:
     props = picture["parameters"]["properties"]
     assert "brief" in props
     assert "topic" in props
+    assert "kind" in props
+    kind = props["kind"]
+    values = kind.get("enum") or []
+    assert "diagram" in values
+    assert "looks" in values
     desc = str(picture.get("description", "")).lower()
     assert "illustrat" in desc or "point" in desc
     assert "claude" in desc or "choose" in desc or "judgment" in desc
@@ -329,6 +367,9 @@ def test_spoken_instructions_tell_the_tutor_to_find_videos_itself() -> None:
     assert "never ask" in lowered
     assert "show_picture" in text
     assert "brief" in lowered
+    assert "kind looks" in lowered or ("looks" in lowered and "diagram" in lowered)
+    assert "legend" in lowered or "story" in lowered
+    assert "not a real" in lowered or "imagine" in lowered
     assert "claude" in lowered
     assert "illustrat" in lowered or "point" in lowered or "judgment" in lowered
     assert "made-up" in lowered or "story" in lowered or "pretend" in lowered
@@ -417,6 +458,35 @@ def test_fantasy_talk_gets_a_gentle_nudge_toward_real_things() -> None:
     assert outbound[-1]["type"] == "response.create"
 
 
+def test_a_picture_request_picks_looks_or_diagram_and_marks_stories() -> None:
+    asked = "Show me a picture of that ocean legend."
+    note = picture_request_briefing(asked, name="Arum")
+    assert note is not None
+    lowered = note.lower()
+    assert "arum" in lowered
+    assert "kind looks" in lowered
+    assert "diagram" in lowered
+    assert "legend" in lowered or "story" in lowered
+    assert "imagine" in lowered or "not a real" in lowered
+    assert "bloop" not in lowered
+    assert picture_request_briefing("How do gears work?", name="Arum") is None
+    assert picture_request_briefing("Show me a picture of Peppa Pig", name="Arum") is None
+    assert real_world_nudge("Show me a picture of a dragon") is None
+    mapper = RealtimeMapper(child_name="Arum")
+    _ui, outbound = mapper.handle(
+        {
+            "type": "conversation.item.input_audio_transcription.completed",
+            "transcript": asked,
+        }
+    )
+    notes = [
+        str(item["item"]["content"][0]["text"])
+        for item in outbound
+        if item.get("type") == "conversation.item.create"
+    ]
+    assert any("kind looks" in item.lower() and "diagram" in item.lower() for item in notes)
+
+
 def test_looks_like_child_speech_rejects_garbled_words() -> None:
     assert looks_like_child_speech("How big is a blue whale next to a school bus?")
     assert looks_like_child_speech("Show me a dinosaur.")
@@ -448,8 +518,20 @@ def test_filler_only_transcript_keeps_listening() -> None:
             "transcript": "Um",
         }
     )
-    assert ui == []
-    assert outbound == []
+    assert ui == [{"type": "state", "name": "listening", "detail": ""}]
+    assert outbound == [{"type": "input_audio_buffer.clear"}]
+
+
+def test_empty_transcript_keeps_listening() -> None:
+    mapper = RealtimeMapper()
+    ui, outbound = mapper.handle(
+        {
+            "type": "conversation.item.input_audio_transcription.completed",
+            "transcript": "",
+        }
+    )
+    assert ui == [{"type": "state", "name": "listening", "detail": ""}]
+    assert outbound == [{"type": "input_audio_buffer.clear"}]
 
 
 def test_unclear_transcript_asks_the_child_to_confirm() -> None:
@@ -503,6 +585,40 @@ def test_paused_video_note_tells_the_tutor_to_listen() -> None:
     assert "picture" in lowered or "show_picture" in lowered
     assert "keep watching" in lowered or "resume" in lowered
     assert "stop" in lowered
+
+
+def test_finished_video_note_invites_a_question_or_something_else() -> None:
+    text = finished_video_note()
+    lowered = text.lower()
+    assert "finish" in lowered or "ended" in lowered or "over" in lowered
+    assert "question" in lowered
+    assert "something else" in lowered or "another" in lowered
+    assert "video" in lowered or "song" in lowered
+
+
+def test_add_system_note_can_ask_the_tutor_to_speak() -> None:
+    class FakeSocket:
+        def __init__(self) -> None:
+            self.sent: list[dict[str, object]] = []
+
+        async def send(self, raw: str) -> None:
+            self.sent.append(json.loads(raw))
+
+    async def run() -> None:
+        talk = RealtimeTalk(
+            api_key="sk-test",
+            instructions="help",
+            execute=lambda _name, _args: {},
+        )
+        talk._socket = FakeSocket()
+        await talk.add_system_note(finished_video_note(), speak=True)
+        kinds = [item["type"] for item in talk._socket.sent]
+        assert "conversation.item.create" in kinds
+        assert "response.create" in kinds
+        note = talk._socket.sent[0]["item"]["content"][0]["text"]
+        assert "question" in str(note).lower()
+
+    asyncio.run(run())
 
 
 def test_video_control_resume_waits_to_speak_then_resumes() -> None:

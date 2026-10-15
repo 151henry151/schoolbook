@@ -77,6 +77,7 @@ def build_host(config: SchoolbookConfig, secrets: Secrets) -> Host:
         ),
         min_video_pause_s=float(profile.watch_along_pause_min_seconds),
         pictures=_pictures(secrets, config.summary_model),
+        scenes=_scenes(secrets),
         images_dir=config.images_dir,
         launcher=_spawn_app,
         killer=_kill_app,
@@ -160,6 +161,14 @@ def _pictures(secrets: Secrets, model: str = "claude-sonnet-5-5") -> PictureMake
         from schoolbookd.providers.claude_pictures import ClaudePictures
 
         return ClaudePictures(secrets.anthropic_api_key, model=model)
+    if secrets.openai_api_key:
+        from schoolbookd.providers.openai_images import OpenAIImages
+
+        return OpenAIImages(secrets.openai_api_key)
+    return None
+
+
+def _scenes(secrets: Secrets) -> PictureMaker | None:
     if secrets.openai_api_key:
         from schoolbookd.providers.openai_images import OpenAIImages
 

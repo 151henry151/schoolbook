@@ -212,3 +212,38 @@ def test_child_unlock_end_requests_kiosk_exit(tmp_path: Path) -> None:
     assert ended.status_code == 200
     assert ended.json()["ended"] is True
     assert (tmp_path / "kiosk.end").read_text(encoding="utf-8").strip() == "end"
+
+
+def test_child_lists_and_joins_wifi(tmp_path: Path) -> None:
+    from schoolbookd.net.wifi import Wifi
+
+    def run(argv: list[str], **_kwargs: object) -> object:
+        joined = " ".join(argv)
+        if "STATE,CONNECTIVITY" in joined:
+            return type("Result", (), {"returncode": 0, "stdout": "disconnected:none\n", "stderr": ""})()
+        if "NAME,TYPE" in joined:
+            return type("Result", (), {"returncode": 0, "stdout": "", "stderr": ""})()
+        if "wifi list" in joined:
+            return type(
+                "Result",
+                (),
+                {"returncode": 0, "stdout": "no:Grandpa:70:WPA2\n", "stderr": ""},
+            )()
+        return type("Result", (), {"returncode": 0, "stdout": "", "stderr": ""})()
+
+    host = _host(tmp_path)
+    host.wifi = Wifi(run=run)
+    child = TestClient(child_app(host))
+    listed = child.get("/wifi")
+    assert listed.status_code == 200
+    assert listed.json()["networks"][0] == {"ssid": "Grandpa", "signal": 70, "secured": True}
+    assert listed.json()["connected"] is False
+    denied = child.post("/wifi/connect", json={"ssid": "Grandpa", "password": "house-key"})
+    assert denied.status_code == 401
+    joined = child.post(
+        "/wifi/connect",
+        json={"ssid": "Grandpa", "password": "house-key"},
+        headers={"x-schoolbook-token": "boot-token"},
+    )
+    assert joined.status_code == 200
+    assert joined.json()["ok"] is True

@@ -70,6 +70,16 @@ def test_show_picture_accepts_a_diagram_brief() -> None:
     )
     assert policy.check("show_picture", {"topic": "shark depth", "brief": brief}, _ctx()).allowed
     assert not policy.check("show_picture", {"topic": "shark", "brief": "x" * 1201}, _ctx()).allowed
+    assert policy.check(
+        "show_picture",
+        {"topic": "ocean legend", "brief": "how people imagine it", "kind": "looks"},
+        _ctx(),
+    ).allowed
+    assert not policy.check(
+        "show_picture",
+        {"topic": "shark", "brief": "how it looks", "kind": "photo"},
+        _ctx(),
+    ).allowed
 
 
 def test_ask_choice_bounds() -> None:
