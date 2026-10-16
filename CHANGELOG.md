@@ -7,11 +7,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-### Fixed
-
-- Find Debian games under `/usr/games`, require a specific GCompris activity, use software rendering on older graphics, and return to the tutor when the game exits. A separate system-Python return button works even when the daemon Python lacks Tk.
-- Clear the CF-30's separate Panasonic firmware mute at kiosk startup, restoring speaker audio when ALSA and PipeWire already report unmuted.
-- Load the current child UI on every kiosk start, including F11 recovery, instead of reusing an older cached screen whose speech controls do not match the backend. HTML entry pages are no longer cached; hashed assets remain cacheable.
+## [0.11.0] - 2026-10-16
 
 ### Added
 
@@ -19,6 +15,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Expose the full GCompris 25.0.12 activity catalog, including falling-letter typing and both spoken-letter train activities, with offline English voice/resource setup.
 - Resolve named albums by exact title and artist, verify the release tracks, and play them in album order. Failed or incomplete lookups no longer fall back to unrelated songs or narrated videos.
 - Add a top-right Wi-Fi button on the child's home and talk screens, with network selection, connection status, refresh, and a closable settings panel.
+
+### Fixed
+
+- Find Debian games under `/usr/games`, require a specific GCompris activity, use software rendering on older graphics, and return to the tutor when the game exits. A separate system-Python return button works even when the daemon Python lacks Tk.
+- Clear the CF-30's separate Panasonic firmware mute at kiosk startup, restoring speaker audio when ALSA and PipeWire already report unmuted.
+- Load the current child UI on every kiosk start, including F11 recovery, instead of reusing an older cached screen whose speech controls do not match the backend. HTML entry pages are no longer cached; hashed assets remain cacheable.
+
+### Changed
+
+- Update the shared protocol package to 1.2.0 for halfway-watched video notifications; wire protocol major 1 remains compatible.
 
 ## [0.10.0] - 2026-10-15
 

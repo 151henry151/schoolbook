@@ -2,13 +2,13 @@
 
 Schoolbook is a locked-down Linux learning environment for one child. The machine boots into a kiosk. The child talks with a tutor, sees a full-screen board, watches vetted videos, and can open a short list of educational apps. A parent console on a separate port shows what happened.
 
-Version 0.10.0 adds CF-30 recovery controls, reliable speech resets, familiar-song playback, and a mobile parent console to the software described in [docs/design-spec.md](docs/design-spec.md). Version 1.0.0 waits for a real pilot with a parent nearby. `schoolbook` starts a cage kiosk for the current session. It does not replace the machine's login manager; `packaging/install.sh` is the path that boots straight into Schoolbook.
+Version 0.11.0 adds verified albums in track order, direct GCompris activities with English voices, and video history that favors unseen videos to the software described in [docs/design-spec.md](docs/design-spec.md). Version 1.0.0 waits for a real pilot with a parent nearby. `schoolbook` starts a cage kiosk for the current session. It does not replace the machine's login manager; `packaging/install.sh` is the path that boots straight into Schoolbook.
 
 ## Layout
 
 - `daemon/` — `schoolbookd`, the tutor, database, and HTTP API
 - `session/` — `schoolbook-session`, the allowlisted app launcher
-- `protocol/` — shared message models, package 1.1.0 / wire protocol major 1
+- `protocol/` — shared message models, package 1.2.0 / wire protocol major 1
 - `ui/` — the child's screen
 - `console/` — the parent console
 - `prompts/`, `profiles/`, `skills/`, `apps.d/` — shipped content
@@ -51,6 +51,12 @@ After the avatar tap, the microphone stays on. Speak, pause, and the tutor answe
 
 ## CF-30 kiosk controls
 
+The **Wi-Fi** button at the top right opens connection status and nearby networks. Choose a network, enter its password if needed, and select **Join**. **Refresh networks** checks again; **×** or Escape closes the panel. Opening settings during a conversation pauses listening; tap the microphone to resume. The button is hidden during videos, songs, and games. The hidden parent-unlock area sits immediately to its left on the talk screen. Network selection requires NetworkManager to manage the Wi-Fi interface. The current CF-30 uses ifupdown, so its settings panel reports Wi-Fi unavailable; its existing connection remains usable. Migrating networking requires a separate maintenance window with local recovery access.
+
+Every kiosk launch (including F11 recovery) fetches a fresh entry page so Chromium cannot keep an older UI after an update. HTML entry pages are not cached; hashed scripts, styles, and fonts can still use the browser cache.
+
+On the CF-30, kiosk startup also clears the Panasonic firmware mute, which is separate from the normal Linux volume controls and can remain set after changing operating systems. It is cleared once per kiosk start, so the hardware mute key still works during use.
+
 Tap the **microphone** to cancel the current speech attempt and start a fresh connection. Tap the **stop sign** to cancel the attempt and immediately silence the tutor; listening stays paused until the microphone is tapped again. A fresh connection clears the live AI conversation context, while saved learner data and transcripts remain. Connection setup and network waits do not block these controls. A disconnected browser can reconnect on the next microphone tap.
 
 For each speech turn, the finalized transcription shown on screen replaces the corresponding audio message in the tutor’s conversation before a reply is requested. This gives the tutor the same words the parent sees, rather than a separate interpretation of the audio. Names, numbers, and meaningful words are preserved. Unrecognized audio is discarded; a transcription failure shows a recoverable microphone error. Spoken replies still use OpenAI Realtime audio.
@@ -63,9 +69,11 @@ In the CF-30's systemd-managed X11/Openbox kiosk, **F11 restarts Schoolbook**, i
 
 For an existing CF-30 installation, update the application and rebuild `ui/`, including `packaging/openbox/rc.xml`. Install the updated `packaging/systemd/schoolbook-kiosk.service` in `/etc/systemd/system/` and run `systemctl daemon-reload` as root; its ten-second stop timeout bounds recovery from stuck processes. The Openbox binding takes effect on the next kiosk start. Arrange that restart for a break in use; avoid restarting the kiosk while a child is using it.
 
-## Music controls and familiar songs
+## Video history and music controls
 
 The child’s song screen has a large **pause/play** button. Pausing allows speech again; resuming stops microphone capture. Closing a song cancels the remaining queue.
+
+Video watch history is separate from music history. A video counts as watched only after at least 50% of its distinct content has actually played in that viewing. Pauses, buffering, seeking over content, and replaying the same short segment do not add coverage. The browser reports the halfway milestone once; the daemon checks the current video and duration before saving it per learner in SQLite. Search results include `watch_count` and `last_watched_at` and put unseen videos first. The tutor can also call `get_video_history`. This is a preference: relevant repeats remain available, especially when the child asks for a particular video. Old play counts are not converted because they do not establish half-watched completion. Migration `0003` adds `video_watches`; existing song and learner data remain intact.
 
 Schoolbook records a song after its audio actually starts, once per play (pausing/resuming does not count twice). History is saved per learner in SQLite and survives restarts. Requests such as “I want to hear some music” use `play_music` to shuffle previously heard, still-approved songs and play each once. Naming a song keeps the existing search-and-play behavior. If there is no history yet, the tutor asks which song to play. History begins with this update; old video play counts cannot reliably distinguish songs. Parent blocks are rechecked before each queued track. Album requests such as “Play the album Ugly is Beautiful by Oliver Tree” use YouTube Music release metadata (via `ytmusicapi`) plus the existing YouTube API key to verify the exact album, artist, and playable tracks. The complete album plays in release order, audio only, with the same pause/play controls and muted microphone during playback. Missing title or artist information prompts a question; an unavailable, incomplete, or blocked album produces an explanation instead of unrelated search results. A clean edition is preferred when listed with the same title. Album lookup needs network access to YouTube Music and Google APIs; no additional account is required. Migration `0002` adds `song_plays` without changing existing learner records.
 
@@ -84,14 +92,6 @@ Deployment (independent of the kiosk restart):
 
 Console assets and API requests use relative paths, so the same build still works directly at `http://127.0.0.1:8766/`. Changing the hosted path also requires updating the nginx locations and cookie scope.
 
-Every kiosk launch (including F11 recovery) fetches a fresh entry page so Chromium cannot keep an older UI after an update. HTML entry pages are not cached; hashed scripts, styles, and fonts can still use the browser cache.
-
-On the CF-30, kiosk startup also clears the Panasonic firmware mute, which is separate from the normal Linux volume controls and can remain set after changing operating systems. It is cleared once per kiosk start, so the hardware mute key still works during use.
-
-The **Wi-Fi** button at the top right opens connection status and nearby networks. Choose a network, enter its password if needed, and select **Join**. **Refresh networks** checks again; **×** or Escape closes the panel. Opening settings during a conversation pauses listening; tap the microphone to resume. The button is hidden during videos, songs, and games. The hidden parent-unlock area sits immediately to its left on the talk screen. Network selection requires NetworkManager to manage the Wi-Fi interface. The current CF-30 uses ifupdown, so its settings panel reports Wi-Fi unavailable; its existing connection remains usable. Migrating networking requires a separate maintenance window with local recovery access.
-
-
-
 ## GCompris activities on Debian / the CF-30
 
 Install `gcompris-qt` (including its matching `gcompris-qt-data` dependency) and `python3-tk` with the system package manager. Run `python3 packaging/setup-gcompris.py` **as the account running the kiosk** (currently root on the CF-30). It installs and checks the official English and US English voices, word images, and music resource packs, configures US English speech, disables background music and startup downloads, and preserves activity progress. Assets remain available offline. Rerun it to refresh those assets.
@@ -101,8 +101,6 @@ The shipped manifest describes all 196 activities in Debian Trixie's GCompris 25
 Ask for “the falling letters typing game” (`gletters`) or “the train game that says a letter” (`click_on_letter`; `click_on_letter_up` uses capitals). The tutor can search activity titles and descriptions. The full suite is installed locally; the tutor launches one chosen activity directly. GCompris's Home button exits a directly launched activity. Schoolbook also supplies a red **×** at the bottom right, leaving the top-right repeat-letter speaker unobstructed. Exiting either way returns to the tutor and restores listening. F11 still restarts the kiosk if needed.
 
 Launching or exiting an activity does **not** prove the child completed it. Requiring learning activities before music/videos is not enabled; reliable activity-completion reporting and parent-configured requirements would be needed before adding that feature.
-
-Video watch history is separate from music history. A video counts as watched only after at least 50% of its distinct content has actually played in that viewing. Pauses, buffering, seeking over content, and replaying the same short segment do not add coverage. The browser reports the halfway milestone once; the daemon checks the current video and duration before saving it per learner in SQLite. Search results include `watch_count` and `last_watched_at` and put unseen videos first. The tutor can also call `get_video_history`. This is a preference: relevant repeats remain available, especially when the child asks for a particular video. Old play counts are not converted because they do not establish half-watched completion. Migration `0003` adds `video_watches`; existing song and learner data remain intact.
 
 ## License
 
