@@ -707,7 +707,9 @@ test("a wifi probe failure does not put the tutor to rest", async () => {
   expect(screen.queryByRole("region", { name: "Wi-Fi" })).toBeNull();
 });
 
-test("offline rest shows a Wi-Fi picker", async () => {
+test("Wi-Fi button opens the offline network picker and closes it", async () => {
+  HTMLDialogElement.prototype.showModal = function () { this.open = true; };
+  HTMLDialogElement.prototype.close = function () { this.open = false; };
   vi.stubGlobal(
     "fetch",
     vi.fn(async (url: string) => {
@@ -732,6 +734,9 @@ test("offline rest shows a Wi-Fi picker", async () => {
       data: JSON.stringify({ type: "state", name: "offline" }),
     } as MessageEvent);
   });
+  fireEvent.click(screen.getByRole("button", { name: "Wi-Fi settings" }));
   expect(await screen.findByRole("region", { name: "Wi-Fi" })).toBeTruthy();
-  expect(screen.getByRole("button", { name: "Grandpa" })).toBeTruthy();
+  expect(await screen.findByRole("button", { name: "Grandpa" })).toBeTruthy();
+  fireEvent.click(screen.getByRole("button", { name: "Close Wi-Fi settings" }));
+  expect(screen.queryByRole("dialog")).toBeNull();
 });

@@ -88,6 +88,8 @@ Every kiosk launch (including F11 recovery) fetches a fresh entry page so Chromi
 
 On the CF-30, kiosk startup also clears the Panasonic firmware mute, which is separate from the normal Linux volume controls and can remain set after changing operating systems. It is cleared once per kiosk start, so the hardware mute key still works during use.
 
+The **Wi-Fi** button at the top right opens connection status and nearby networks. Choose a network, enter its password if needed, and select **Join**. **Refresh networks** checks again; **×** or Escape closes the panel. Opening settings during a conversation pauses listening; tap the microphone to resume. The button is hidden during videos, songs, and games. The hidden parent-unlock area sits immediately to its left on the talk screen. Network selection requires NetworkManager to manage the Wi-Fi interface. The current CF-30 uses ifupdown, so its settings panel reports Wi-Fi unavailable; its existing connection remains usable. Migrating networking requires a separate maintenance window with local recovery access.
+
 ## License
 
 GPL-3.0-or-later. See [LICENSE](LICENSE) and [NOTICE](NOTICE).

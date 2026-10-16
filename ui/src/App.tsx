@@ -11,7 +11,7 @@ import { PlaybackQueue, decodePcm16, webAudioPlayer } from "./playback";
 import { createVad, encodePcm16 } from "./pcm";
 import { PROTOCOL_MAJOR, type BoardElement } from "./protocol";
 import { ParentUnlock } from "./unlock";
-import { WifiSetup } from "./wifi";
+import { WifiButton } from "./wifi";
 import { TalkLines, nextTalkPair, playbackWordIndex, type TalkPair } from "./talkLines";
 import { PictureOverlay } from "./picture";
 import { TalkStatus, type TalkStatusKind } from "./talkStatus";
@@ -436,7 +436,7 @@ export function App() {
     return (
       <main className="home">
         <BatteryIndicator />
-        {offline ? <WifiSetup token={token} /> : null}
+        <WifiButton token={token} />
         <button
           type="button"
           className="avatar"
@@ -464,9 +464,10 @@ export function App() {
   return (
     <main className="talk">
       {!videoId && !appId ? <BatteryIndicator /> : null}
+      {!videoId && !appId ? <WifiButton token={token} onOpen={pauseListen} /> : null}
       <button
         type="button"
-        className={videoId || appId ? "hold-corner hold-left" : "hold-corner"}
+        className={videoId || appId ? "hold-corner hold-left" : "hold-corner beside-wifi"}
         aria-label="parent corner"
         onPointerDown={() => {
           holdStarted.current = Date.now();
@@ -502,7 +503,7 @@ export function App() {
       {offline ? (
         <section aria-label="offline apps">
           <p>The tutor is resting.</p>
-          <WifiSetup token={token} />
+          <p>Use the Wi-Fi button to check the connection.</p>
           {OFFLINE_APPS.map((app) => (
             <button key={app} type="button">
               {app}
