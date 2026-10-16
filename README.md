@@ -84,6 +84,8 @@ Deployment (independent of the kiosk restart):
 
 Console assets and API requests use relative paths, so the same build still works directly at `http://127.0.0.1:8766/`. Changing the hosted path also requires updating the nginx locations and cookie scope.
 
+Every kiosk launch (including F11 recovery) fetches a fresh entry page so Chromium cannot keep an older UI after an update. HTML entry pages are not cached; hashed scripts, styles, and fonts can still use the browser cache.
+
 ## License
 
 GPL-3.0-or-later. See [LICENSE](LICENSE) and [NOTICE](NOTICE).

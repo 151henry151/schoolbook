@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- Load the current child UI on every kiosk start, including F11 recovery, instead of reusing an older cached screen whose speech controls do not match the backend. HTML entry pages are no longer cached; hashed assets remain cacheable.
+
 ## [0.10.0] - 2026-10-15
 
 ### Fixed

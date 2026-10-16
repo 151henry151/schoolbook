@@ -8,9 +8,11 @@ from __future__ import annotations
 import shutil
 import subprocess
 import time
+import uuid
 from collections.abc import Callable
 from pathlib import Path
 from typing import Protocol
+from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 from schoolbook_session.agent import BROWSER_RESTART_S, chromium_kiosk_argv
 
@@ -81,10 +83,17 @@ def run_chromium_kiosk(
     chromium: str = "chromium",
 ) -> None:
     clear_end(data_dir)
-    argv = chromium_kiosk_argv(url, chromium)
     launcher = spawn or _spawn
     nap = sleep or time.sleep
     while True:
+        # A saved Chromium cache can otherwise load an old UI after an upgrade,
+        # including before that UI ever receives our new cache-control headers.
+        parts = urlsplit(url)
+        query = [(key, value) for key, value in parse_qsl(parts.query, keep_blank_values=True)
+                 if key != "_schoolbook_start"]
+        query.append(("_schoolbook_start", uuid.uuid4().hex))
+        fresh_url = urlunsplit(parts._replace(query=urlencode(query)))
+        argv = chromium_kiosk_argv(fresh_url, chromium)
         browser = launcher(argv)
         while browser.poll() is None:
             if end_requested(data_dir):

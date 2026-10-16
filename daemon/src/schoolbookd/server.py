@@ -10,10 +10,23 @@ from pathlib import Path
 
 import uvicorn
 from fastapi.staticfiles import StaticFiles
+from starlette.responses import Response
+from starlette.types import Scope
 
 from schoolbookd.api import child_app, console_app
 from schoolbookd.bootstrap import build_host
 from schoolbookd.config import SchoolbookConfig, Secrets
+
+
+class UIStaticFiles(StaticFiles):
+    """Keep the entry page current while allowing hashed assets to be cached."""
+
+    async def get_response(self, path: str, scope: Scope) -> Response:
+        response = await super().get_response(path, scope)
+        if (path in {"", ".", "/"} or path.endswith(".html")
+                or response.headers.get("content-type", "").startswith("text/html")):
+            response.headers["Cache-Control"] = "no-store"
+        return response
 
 
 def serve(config: SchoolbookConfig, secrets: Secrets) -> None:
@@ -23,9 +36,9 @@ def serve(config: SchoolbookConfig, secrets: Secrets) -> None:
     ui_dir = _static_dir(config.share_dir, "ui")
     console_dir = _static_dir(config.share_dir, "console")
     if ui_dir is not None:
-        child.mount("/", StaticFiles(directory=ui_dir, html=True), name="ui")
+        child.mount("/", UIStaticFiles(directory=ui_dir, html=True), name="ui")
     if console_dir is not None:
-        console.mount("/", StaticFiles(directory=console_dir, html=True), name="console")
+        console.mount("/", UIStaticFiles(directory=console_dir, html=True), name="console")
     console_thread = threading.Thread(
         target=uvicorn.run,
         kwargs={

@@ -2,6 +2,7 @@
 # SPDX-FileCopyrightText: 2026 Schoolbook contributors
 
 from pathlib import Path
+from urllib.parse import parse_qs, urlsplit
 
 import pytest
 
@@ -64,7 +65,10 @@ def test_chromium_kiosk_exits_when_the_parent_ends_the_session(tmp_path: Path) -
     run_chromium_kiosk("http://127.0.0.1:8765/", tmp_path, spawn=spawn, sleep=sleep, chromium="chromium")
     assert started
     assert "--kiosk" in started[0]
-    assert started[0][-1] == "http://127.0.0.1:8765/"
+    page = urlsplit(started[0][-1])
+    assert page.netloc == "127.0.0.1:8765"
+    assert page.path == "/"
+    assert parse_qs(page.query)["_schoolbook_start"]
     assert browser.ended is True
 
 
@@ -89,10 +93,11 @@ def test_chromium_kiosk_restarts_after_a_crash(tmp_path: Path) -> None:
 
     browsers = [FakeBrowser(1), FakeBrowser(None)]
     spawned = 0
+    urls: list[str] = []
 
     def spawn(argv: list[str]) -> FakeBrowser:
         nonlocal spawned
-        del argv
+        urls.append(argv[-1])
         browser = browsers[spawned]
         spawned += 1
         return browser
@@ -101,6 +106,15 @@ def test_chromium_kiosk_restarts_after_a_crash(tmp_path: Path) -> None:
         if spawned >= 2:
             request_end(tmp_path)
 
-    run_chromium_kiosk("http://127.0.0.1:8765/", tmp_path, spawn=spawn, sleep=sleep, chromium="chromium")
+    run_chromium_kiosk("http://127.0.0.1:8765/?dev=1&_schoolbook_start=old#board",
+                       tmp_path, spawn=spawn, sleep=sleep, chromium="chromium")
     assert spawned == 2
     assert browsers[1].ended is True
+    assert urls[0] != urls[1]
+    for url in urls:
+        page = urlsplit(url)
+        query = parse_qs(page.query)
+        assert query["dev"] == ["1"]
+        assert len(query["_schoolbook_start"]) == 1
+        assert query["_schoolbook_start"] != ["old"]
+        assert page.fragment == "board"
