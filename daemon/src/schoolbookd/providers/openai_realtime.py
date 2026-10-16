@@ -88,6 +88,10 @@ def spoken_child_instructions(
                 "When he asks for music without naming a song, such as I want to hear some music, "
                 "call play_music to play his previously heard songs. Do not search for new music. "
                 "If the history is empty, ask which song he wants. "
+                "For an album, call find_album with its exact title and artist, then play_album with "
+                "the returned album_id. This plays the release tracks in order. Never use search_videos, "
+                "play_video, or play_music as an album substitute. If lookup fails, say so; ask for "
+                "missing title or artist information. Do not invent tracks or claim playback before success. "
                 "When he clearly asks to hear a song, say only: Okay, I'll play [song name]. "
                 "Do not say clean, radio edit, audio version, or that you are looking. "
                 "Then call search_videos with kind song, prefer a clean official audio track "
@@ -242,9 +246,15 @@ def familiar_music_request(text: str) -> bool:
     ))
 
 
+def album_request(text: str) -> bool:
+    return bool(re.search(r"\balbum\b", text, re.I)
+                and re.search(r"\b(play|hear|listen|put on)\b", text, re.I))
+
+
 def _song_request(text: str) -> tuple[str, str] | None:
     stripped = (text or "").strip()
-    if not stripped or video_topic(stripped) or familiar_music_request(stripped):
+    if (not stripped or video_topic(stripped) or familiar_music_request(stripped)
+            or album_request(stripped)):
         return None
     for pattern in _CLEAR_SONG_PATTERNS:
         match = pattern.search(stripped)
@@ -278,6 +288,13 @@ def maybe_song_topic(text: str) -> str | None:
 
 
 def song_listen_briefing(child_text: str, *, name: str = "the child") -> str | None:
+    if album_request(child_text):
+        return (
+            "The child requested an ALBUM, not a song or a video about it. Call find_album with "
+            "the exact album title and artist, then play_album with its verified album_id. "
+            "Ask for the artist if missing. Keep the release track order. If lookup fails, explain "
+            "briefly and do not substitute search_videos, play_video, play_music, reviews, or narration."
+        )
     if familiar_music_request(child_text):
         return "The child wants familiar music. Call play_music. If empty, ask which song to play."
     topic = song_topic(child_text)
@@ -773,6 +790,23 @@ REALTIME_TOOLS: list[dict[str, object]] = [
     },
     {
         "type": "function",
+        "name": "find_album",
+        "description": "Find a verified album and its ordered tracks. Exact title and artist required. "
+                       "If no match, ask for clarification; never substitute a video or guessed tracks.",
+        "parameters": {"type": "object", "properties": {
+            "title": {"type": "string"}, "artist": {"type": "string"}},
+            "required": ["title", "artist"]},
+    },
+    {
+        "type": "function",
+        "name": "play_album",
+        "description": "Play all tracks of the verified album in release order, audio only. "
+                       "Use only the album_id from find_album in this conversation.",
+        "parameters": {"type": "object", "properties": {"album_id": {"type": "string"}},
+                       "required": ["album_id"]},
+    },
+    {
+        "type": "function",
         "name": "play_music",
         "description": ("Play a queue of this child's previously heard songs. "
                         "Use for general music requests, not a named song. If empty, ask for a song name."),
@@ -888,6 +922,8 @@ class RealtimeMapper:
     drop_output: bool = False
     completed_calls: set[str] = field(default_factory=set)
     transcribed_items: set[str] = field(default_factory=set)
+    wants_album: bool = False
+    verified_album_id: str = ""
 
     def picture_ready(self) -> tuple[list[dict[str, object]], list[dict[str, object]]]:
         if not self.waiting_picture:
@@ -907,6 +943,8 @@ class RealtimeMapper:
     def reset_listen(self) -> tuple[list[dict[str, object]], list[dict[str, object]]]:
         self.child_partial = ""
         self.tutor_partial = ""
+        self.wants_album = False
+        self.verified_album_id = ""
         self.pending_video = None
         self.hold_video = False
         self.pending_picture = None
@@ -1055,6 +1093,8 @@ class RealtimeMapper:
                     [{"type": "state", "name": "listening", "detail": ""}],
                     [*discard, {"type": "input_audio_buffer.clear"}],
                 )
+            self.wants_album = album_request(cleaned)
+            self.verified_album_id = ""
             outbound: list[dict[str, object]] = [
                 *discard,
                 {
@@ -1260,10 +1300,19 @@ class RealtimeMapper:
             args = {}
         if name == "ask_choice":
             result: dict[str, object] = {"skipped": True, "reason": "speak the choice out loud"}
+        elif self.wants_album and name in {"search_videos", "play_video", "play_music"}:
+            result = {"error": "This is an album request. Use find_album then play_album; no substitutes."}
+        elif name == "play_album" and (
+            not self.verified_album_id or args.get("album_id") != self.verified_album_id
+        ):
+            result = {"error": "Use the album_id from a successful find_album call first."}
         elif execute is not None:
             result = execute(name, args)
         else:
             result = {"error": "no tool runner"}
+        if name == "find_album":
+            self.wants_album = True
+            self.verified_album_id = str(result.get("album_id") or "") if "error" not in result else ""
         ui: list[dict[str, object]] = []
         if name == "show_board" and "error" not in result:
             elements = args.get("elements")
@@ -1277,7 +1326,8 @@ class RealtimeMapper:
         elif name == "show_picture" and result.get("image_id") and "error" not in result:
             self.pending_picture = {"type": "picture", "image_id": str(result["image_id"])}
             self.hold_picture = True
-        elif name in {"play_video", "play_music"} and "playing" in result and "error" not in result:
+        elif (name in {"play_video", "play_music", "play_album"}
+              and "playing" in result and "error" not in result):
             self.pending_video = {
                 "type": "video",
                 "action": "play",
@@ -1561,17 +1611,18 @@ class RealtimeTalk:
             if (
                 kind in {"response.function_call_arguments.done", "response.output_item.done"}
                 and isinstance(call, dict)
-                and call.get("name") == "search_videos"
+                and call.get("name") in {"search_videos", "find_album"}
+                and not (self.mapper.wants_album and call.get("name") == "search_videos")
                 and str(call.get("call_id", "call")) not in self.mapper.completed_calls
                 and not self.mapper.drop_output
             ):
                 try:
                     args = json.loads(str(call.get("arguments", "{}")))
-                    result = await asyncio.to_thread(
-                        self.execute, "search_videos", args if isinstance(args, dict) else {}
-                    )
+                    result = await asyncio.wait_for(asyncio.to_thread(
+                        self.execute, str(call["name"]), args if isinstance(args, dict) else {}
+                    ), timeout=40)
                 except Exception:
-                    result = {"error": "video search failed"}
+                    result = {"error": "Media lookup failed. Try again later; do not play a substitute."}
 
                 def cached_result(
                     _name: str, _args: dict[str, object], value: dict[str, object] = result,

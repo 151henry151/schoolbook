@@ -424,6 +424,23 @@ class Runtime:
         if name == "get_skill_status":
             profile = self.store.profile_input(live.learner_id)
             return {"practicing": profile.practicing, "review_due": profile.review_due}
+        if name == "find_album":
+            if self.catalog is None:
+                return {"error": "Album lookup is unavailable."}
+            return self.catalog.find_album(str(args["title"]), str(args["artist"]))
+        if name == "play_album":
+            songs = self.catalog.album_tracks(str(args["album_id"])) if self.catalog else []
+            if not songs:
+                return {"error": "Find and verify the album first. Do not invent a track list."}
+            policy = ToolPolicy()
+            context = self.policy_context(live)
+            if any(not policy.check("play_video", {"video_id": song}, context).allowed for song in songs):
+                return {"error": "An album track is blocked or unavailable. Cannot play the complete album."}
+            first, *remaining = songs
+            result = self.run_tool(live, "play_video", {"video_id": first, "audio_only": True})
+            if "error" not in result:
+                live.song_queue = remaining
+            return {**result, "track_count": len(songs)}
         if name == "play_music":
             songs = self.store.familiar_songs(live.learner_id)
             if not songs:

@@ -41,12 +41,19 @@ class YouTubeClient:
         ]
         if not ids:
             return []
-        details = self._client.get(
-            "/youtube/v3/videos",
-            params={"part": "snippet,contentDetails,status", "id": ",".join(ids), "key": self._api_key},
-        )
-        details.raise_for_status()
-        return [_candidate(item) for item in details.json().get("items", [])]
+        return self.videos(ids)
+
+    def videos(self, ids: list[str]) -> list[VideoCandidate]:
+        found: list[VideoCandidate] = []
+        for start in range(0, len(ids), 50):
+            details = self._client.get(
+                "/youtube/v3/videos",
+                params={"part": "snippet,contentDetails,status",
+                        "id": ",".join(ids[start:start + 50]), "key": self._api_key},
+            )
+            details.raise_for_status()
+            found.extend(_candidate(item) for item in details.json().get("items", []))
+        return found
 
 
 def _candidate(item: dict[str, object]) -> VideoCandidate:
@@ -64,7 +71,7 @@ def _candidate(item: dict[str, object]) -> VideoCandidate:
         description=str(snippet.get("description", "")),
         duration_s=duration,
         embeddable=bool(status.get("embeddable", False)),
-        age_restricted=snippet.get("contentRating") not in (None, {}),
+        age_restricted=(details.get("contentRating") or {}).get("ytRating") == "ytAgeRestricted",
         live=snippet.get("liveBroadcastContent") == "live",
         short=duration < 60,
         language=str(snippet.get("defaultAudioLanguage", "en"))[:2],

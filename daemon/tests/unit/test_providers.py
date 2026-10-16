@@ -102,3 +102,24 @@ def test_kid_speak_suite_meets_the_threshold() -> None:
     assert passes("Sharks are old. Want to count teeth?")
     assert not passes("Hello **friend**.")
     assert suite_pass_rate(replies[:100]) >= 0.95
+
+
+def test_album_metadata_batches_ids_and_reads_age_rating_from_content_details():
+    batches = []
+
+    def handler(request):
+        ids = request.url.params['id'].split(',')
+        batches.append(ids)
+        return httpx.Response(200, json={'items': [
+            {'id': video_id, 'snippet': {'title': 'Track', 'channelId': 'artist',
+                                        'channelTitle': 'Artist - Topic'},
+             'status': {'embeddable': True},
+             'contentDetails': {'duration': 'PT3M', 'contentRating': {'ytRating': 'ytAgeRestricted'}}}
+            for video_id in reversed(ids)]})
+
+    client = YouTubeClient('unused', httpx.Client(base_url='https://www.googleapis.com',
+                                                transport=httpx.MockTransport(handler)))
+    found = client.videos([str(n) for n in range(61)])
+    assert [len(batch) for batch in batches] == [50, 11]
+    assert len(found) == 61
+    assert all(v.age_restricted for v in found)

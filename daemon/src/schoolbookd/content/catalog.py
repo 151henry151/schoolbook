@@ -11,6 +11,7 @@ from dataclasses import asdict
 from datetime import UTC, datetime
 from typing import Protocol, cast
 
+from schoolbookd.content.albums import AlbumError, AlbumResolver
 from schoolbookd.content.vetting import (
     ChannelReputation,
     FrameReviewer,
@@ -130,6 +131,7 @@ class VideoCatalog:
         *,
         duration_minutes: tuple[int, int] = (1, 30),
         language: str = "en",
+        albums: AlbumResolver | None = None,
     ) -> None:
         self.store = store
         self.youtube = youtube
@@ -137,6 +139,34 @@ class VideoCatalog:
         self.frames = frames
         self.duration_minutes = duration_minutes
         self.language = language
+        self.albums = albums
+
+    def find_album(self, title: str, artist: str) -> dict[str, object]:
+        if self.albums is None:
+            return {"error": "Album lookup is unavailable. Do not substitute videos or songs."}
+        try:
+            album = self.albums.resolve(title, artist)
+            blocked = self.store.blocked_channels()
+            rejected = self.store.rejected_ids()
+            if any(v.channel_id in blocked or v.video_id in rejected for v in album.tracks):
+                raise AlbumError("An album track is blocked. Cannot play the complete album.")
+            self._approve_requested_songs(album.tracks)
+            result: dict[str, object] = {
+                "album_id": album.album_id, "title": album.title, "artist": album.artist,
+                "tracks": [{"video_id": v.video_id, "title": v.title} for v in album.tracks],
+            }
+            self.store.put_setting("verified-album:" + album.album_id, result, actor="system")
+            return result
+        except AlbumError as exc:
+            return {"error": str(exc)}
+        except Exception:
+            return {"error": "Album service unavailable. Try again later; do not play a substitute."}
+
+    def album_tracks(self, album_id: str) -> list[str]:
+        album = self.store.get_setting("verified-album:" + album_id)
+        if not isinstance(album, dict) or not isinstance(album.get("tracks"), list):
+            return []
+        return [str(track["video_id"]) for track in album["tracks"]]
 
     def search(self, query: str, *, kind: str = "video") -> list[dict[str, object]]:
         song = kind == "song"

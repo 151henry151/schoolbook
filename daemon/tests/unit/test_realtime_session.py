@@ -131,3 +131,41 @@ def test_song_playback_drops_queued_audio_and_late_transcriptions() -> None:
         await session.close()
 
     asyncio.run(run())
+
+
+def test_stop_cancels_album_lookup_without_waiting_for_network_thread():
+    import threading
+
+    async def run():
+        socket = Socket()
+        entered = threading.Event()
+        release = threading.Event()
+        emitted = []
+
+        async def connect(_key):
+            return socket
+
+        async def emit(event):
+            emitted.append(event)
+
+        def lookup(name, args):
+            entered.set()
+            release.wait(timeout=3)
+            return {'album_id': 'verified'}
+
+        talk = RealtimeTalk('unused', 'help', lookup, connect)
+        await talk.start()
+        pump = asyncio.create_task(talk.pump(emit))
+        socket.event({'type': 'response.function_call_arguments.done', 'call_id': 'album',
+                      'name': 'find_album', 'arguments': '{"title":"Album","artist":"Artist"}'})
+        try:
+            assert await asyncio.to_thread(entered.wait, 1)
+            pump.cancel()
+            await asyncio.wait_for(asyncio.gather(pump, return_exceptions=True), 0.5)
+            await talk.close()
+            assert socket.closed
+            assert not any(e.get('type') == 'video' for e in emitted)
+        finally:
+            release.set()
+
+    asyncio.run(run())

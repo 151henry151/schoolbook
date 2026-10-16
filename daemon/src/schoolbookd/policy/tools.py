@@ -42,6 +42,8 @@ _KNOWN = {
     "search_videos",
     "play_video",
     "play_music",
+    "find_album",
+    "play_album",
     "vet_video",
     "video_control",
     "show_picture",
@@ -112,6 +114,18 @@ class ToolPolicy:
 
     def _check_play_music(self, args: dict[str, object], ctx: PolicyContext) -> Decision:
         return Decision(True, "ok")
+
+    def _check_find_album(self, args: dict[str, object], ctx: PolicyContext) -> Decision:
+        for key in ("title", "artist"):
+            value = args.get(key)
+            if not isinstance(value, str) or not value.strip() or len(value) > 160:
+                return Decision(False, f"Album {key} is required; ask the child if unknown.")
+        return Decision(True, "ok")
+
+    def _check_play_album(self, args: dict[str, object], ctx: PolicyContext) -> Decision:
+        value = args.get("album_id")
+        valid = isinstance(value, str) and 0 < len(value.strip()) <= 160
+        return Decision(valid, "ok" if valid else "album_id from find_album is required")
 
     def _check_play_video(self, args: dict[str, object], ctx: PolicyContext) -> Decision:
         video_id = args.get("video_id")

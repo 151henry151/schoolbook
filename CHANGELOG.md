@@ -14,6 +14,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Resolve named albums by exact title and artist, verify the release tracks, and play them in album order. Failed or incomplete lookups no longer fall back to unrelated songs or narrated videos.
 - Add a top-right Wi-Fi button on the child's home and talk screens, with network selection, connection status, refresh, and a closable settings panel.
 
 ## [0.10.0] - 2026-10-15

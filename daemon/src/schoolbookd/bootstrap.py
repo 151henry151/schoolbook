@@ -17,6 +17,7 @@ from sqlalchemy import select
 
 from schoolbookd.api import Host
 from schoolbookd.config import SchoolbookConfig, Secrets
+from schoolbookd.content.albums import AlbumResolver
 from schoolbookd.content.apps import load_manifests
 from schoolbookd.content.catalog import CharterReviewer, SearchClient, VideoCatalog
 from schoolbookd.content.pictures import PictureMaker
@@ -28,6 +29,7 @@ from schoolbookd.notify import Notifier
 from schoolbookd.overlay import show_close_overlay
 from schoolbookd.policy.output_check import OutputCheck
 from schoolbookd.providers.base import FakeLLM, FakeSTT, FakeTTS, LLMProvider, STTProvider, TTSProvider
+from schoolbookd.providers.youtube import YouTubeClient
 from schoolbookd.runtime import Runtime
 from schoolbookd.safety.classifier import KeywordClassifier
 from schoolbookd.tutor.prompts import load_age_profile
@@ -51,6 +53,7 @@ def build_host(config: SchoolbookConfig, secrets: Secrets) -> Host:
     with contextlib.suppress(OSError):
         config.token_file.chmod(0o640)
     reviewer = CharterReviewer()
+    youtube = _youtube(secrets)
     runtime = Runtime(
         store=store,
         llm=_llm(config, secrets),
@@ -63,11 +66,12 @@ def build_host(config: SchoolbookConfig, secrets: Secrets) -> Host:
         summary=_llm(config, secrets),
         catalog=VideoCatalog(
             store,
-            _youtube(secrets),
+            youtube,
             reviewer,
             reviewer,
             duration_minutes=_duration(profile.video_duration_minutes),
             language=profile.language,
+            albums=AlbumResolver(youtube.videos) if isinstance(youtube, YouTubeClient) else None,
         ),
         classifier=KeywordClassifier() if config.providers.classifier else None,
         notifier=Notifier(

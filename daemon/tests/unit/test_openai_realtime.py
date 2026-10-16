@@ -1212,3 +1212,51 @@ def test_socket_replaces_audio_before_requesting_a_spoken_reply() -> None:
         await asyncio.gather(worker, return_exceptions=True)
         await talk.close()
     asyncio.run(run())
+
+
+def test_album_request_requires_verified_album_tools_without_song_fallback() -> None:
+    text = 'Play me the album Ugly is Beautiful by Oliver Tree'
+    assert song_topic(text) is None
+    assert 'find_album' in song_listen_briefing(text)
+    mapper = RealtimeMapper()
+    mapper.handle({'type': 'conversation.item.input_audio_transcription.completed', 'transcript': text})
+    assert mapper.wants_album
+    called = []
+
+    def execute(name, args):
+        called.append(name)
+        if name == 'find_album':
+            return {'album_id': 'verified', 'tracks': []}
+        return {'playing': 'jbmM-_6O6DE', 'audio_only': True}
+
+    def call(name, args, call_id):
+        return mapper.handle({'type': 'response.function_call_arguments.done', 'call_id': call_id,
+                              'name': name, 'arguments': json.dumps(args)}, execute=execute)
+
+    for name in ('search_videos', 'play_video', 'play_music', 'play_album'):
+        _, outbound = call(name, {'album_id': 'guessed'}, name)
+        assert 'error' in json.loads(outbound[0]['item']['output'])
+    assert called == []
+    call('find_album', {'title': 'Ugly is Beautiful', 'artist': 'Oliver Tree'}, 'find')
+    call('play_album', {'album_id': 'verified'}, 'play')
+    assert called == ['find_album', 'play_album']
+    assert mapper.pending_video['video_id'] == 'jbmM-_6O6DE'
+    assert mapper.pending_video['audio_only'] is True
+    mapper.reset_listen()
+    assert mapper.pending_video is None
+    assert mapper.verified_album_id == ''
+
+
+def test_failed_album_lookup_after_artist_clarification_still_blocks_substitutes():
+    mapper = RealtimeMapper()  # The latest child utterance may just be the artist's name.
+    calls = []
+
+    def execute(name, args):
+        calls.append(name)
+        return {'error': 'No exact album'}
+
+    for index, name in enumerate(['find_album', 'search_videos', 'play_music']):
+        mapper.handle({'type': 'response.function_call_arguments.done', 'call_id': str(index),
+                       'name': name, 'arguments': '{}'}, execute=execute)
+    assert calls == ['find_album']
+    assert mapper.verified_album_id == ''

@@ -67,7 +67,7 @@ For an existing CF-30 installation, update the application and rebuild `ui/`, in
 
 The child’s song screen has a large **pause/play** button. Pausing allows speech again; resuming stops microphone capture. Closing a song cancels the remaining queue.
 
-Schoolbook records a song after its audio actually starts, once per play (pausing/resuming does not count twice). History is saved per learner in SQLite and survives restarts. Requests such as “I want to hear some music” use `play_music` to shuffle previously heard, still-approved songs and play each once. Naming a song keeps the existing search-and-play behavior. If there is no history yet, the tutor asks which song to play. History begins with this update; old video play counts cannot reliably distinguish songs. Parent blocks are rechecked before each queued track. Migration `0002` adds `song_plays` without changing existing learner records.
+Schoolbook records a song after its audio actually starts, once per play (pausing/resuming does not count twice). History is saved per learner in SQLite and survives restarts. Requests such as “I want to hear some music” use `play_music` to shuffle previously heard, still-approved songs and play each once. Naming a song keeps the existing search-and-play behavior. If there is no history yet, the tutor asks which song to play. History begins with this update; old video play counts cannot reliably distinguish songs. Parent blocks are rechecked before each queued track. Album requests such as “Play the album Ugly is Beautiful by Oliver Tree” use YouTube Music release metadata (via `ytmusicapi`) plus the existing YouTube API key to verify the exact album, artist, and playable tracks. The complete album plays in release order, audio only, with the same pause/play controls and muted microphone during playback. Missing title or artist information prompts a question; an unavailable, incomplete, or blocked album produces an explanation instead of unrelated search results. A clean edition is preferred when listed with the same title. Album lookup needs network access to YouTube Music and Google APIs; no additional account is required. Migration `0002` adds `song_plays` without changing existing learner records.
 
 ## Parent console on romptele.com
 
@@ -89,6 +89,8 @@ Every kiosk launch (including F11 recovery) fetches a fresh entry page so Chromi
 On the CF-30, kiosk startup also clears the Panasonic firmware mute, which is separate from the normal Linux volume controls and can remain set after changing operating systems. It is cleared once per kiosk start, so the hardware mute key still works during use.
 
 The **Wi-Fi** button at the top right opens connection status and nearby networks. Choose a network, enter its password if needed, and select **Join**. **Refresh networks** checks again; **×** or Escape closes the panel. Opening settings during a conversation pauses listening; tap the microphone to resume. The button is hidden during videos, songs, and games. The hidden parent-unlock area sits immediately to its left on the talk screen. Network selection requires NetworkManager to manage the Wi-Fi interface. The current CF-30 uses ifupdown, so its settings panel reports Wi-Fi unavailable; its existing connection remains usable. Migrating networking requires a separate maintenance window with local recovery access.
+
+
 
 ## License
 

@@ -973,7 +973,7 @@ def _ws_messages(outcome: TurnOutcome, turn_id: str) -> list[dict[str, object]]:
                     "options": record.arguments.get("options", []),
                 }
             )
-        if record.name in {"play_video", "play_music"} and "playing" in record.result:
+        if record.name in {"play_video", "play_music", "play_album"} and "playing" in record.result:
             messages.append(
                 {
                     "type": "video",
