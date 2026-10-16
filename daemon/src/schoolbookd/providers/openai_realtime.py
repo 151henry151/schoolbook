@@ -103,6 +103,8 @@ def spoken_child_instructions(
                 "If he said a kind, call list_apps, pick a GCompris activity, "
                 "say Okay, let's play [title], and call launch_app with app_id gcompris and that activity. "
                 "Only GCompris games. Speak the choices. Do not show buttons. "
+                "Falling letters/typing is gletters; spoken letter names on a train is click_on_letter "
+                "(lowercase) or click_on_letter_up (uppercase). Always select a specific activity. "
                 "If you are not sure he wants a song, "
                 "ask: Did you mean you wanted to hear the song called [name]? "
                 "Then wait. Do not play music until he says yes. "
@@ -251,10 +253,22 @@ def album_request(text: str) -> bool:
                 and re.search(r"\b(play|hear|listen|put on)\b", text, re.I))
 
 
+def letter_game_topic(text: str) -> str | None:
+    if not re.search(r"\b(play|playing|want|try)\b", text, re.I):
+        return None
+    if re.search(r"\b(song|album)\b", text, re.I):
+        return None
+    if re.search(r"falling letters|letters.{0,30}(fall|drop)|typing game", text, re.I):
+        return "falling letters typing"
+    if re.search(r"train.{0,40}letters?|letters?.{0,40}train", text, re.I):
+        return "spoken letters on a train"
+    return None
+
+
 def _song_request(text: str) -> tuple[str, str] | None:
     stripped = (text or "").strip()
     if (not stripped or video_topic(stripped) or familiar_music_request(stripped)
-            or album_request(stripped)):
+            or album_request(stripped) or letter_game_topic(stripped)):
         return None
     for pattern in _CLEAR_SONG_PATTERNS:
         match = pattern.search(stripped)
@@ -312,6 +326,9 @@ def song_listen_briefing(child_text: str, *, name: str = "the child") -> str | N
 
 
 def game_topic(text: str) -> str | None:
+    letters = letter_game_topic(text)
+    if letters:
+        return letters
     if song_topic(text):
         return None
     stripped = (text or "").strip()

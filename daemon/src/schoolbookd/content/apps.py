@@ -15,6 +15,7 @@ class Activity(BaseModel):
     model_config = ConfigDict(extra="forbid")
     id: str
     title: str
+    description: str = ""
     skills: list[str] = Field(default_factory=list)
     ages: list[int] = Field(default_factory=list)
 

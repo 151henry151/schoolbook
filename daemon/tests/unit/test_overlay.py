@@ -4,8 +4,8 @@
 from schoolbookd.overlay import CLOSE_MARGIN, CLOSE_SIZE, close_button_geometry
 
 
-def test_close_button_sits_in_the_top_right_corner() -> None:
+def test_close_button_sits_in_the_bottom_right_corner() -> None:
     left, top, width, height = close_button_geometry(1920, 1080)
     assert (width, height) == (CLOSE_SIZE, CLOSE_SIZE)
-    assert top == CLOSE_MARGIN
+    assert top == 1080 - CLOSE_SIZE - CLOSE_MARGIN
     assert left == 1920 - CLOSE_SIZE - CLOSE_MARGIN

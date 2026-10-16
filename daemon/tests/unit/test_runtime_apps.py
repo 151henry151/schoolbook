@@ -104,3 +104,43 @@ def test_stop_app_closes_gcompris_and_the_overlay(tmp_path: Path) -> None:
     assert overlay == ["shown", "hidden"]
     assert live.screen == "home"
     assert live.app_pid is None
+
+
+def test_natural_game_exit_returns_to_tutor_once(tmp_path: Path) -> None:
+    runtime, live, _ = _runtime(tmp_path)
+    exited = []
+    runtime.on_app_exit = lambda: exited.append(True)
+    runtime.app_running = lambda pid: False
+    runtime.killer = lambda pid: None
+    runtime.run_tool(live, 'launch_app', {'app_id': 'gcompris', 'activity': 'memory'})
+    runtime.check_app_exit(live)
+    runtime.check_app_exit(live)
+    assert exited == [True]
+    assert live.screen == 'home'
+    assert live.app_pid is None
+
+
+def test_launch_failure_and_missing_activity_do_not_leave_tutor_in_app(tmp_path: Path) -> None:
+    runtime, live, _ = _runtime(tmp_path)
+    assert 'error' in runtime.run_tool(live, 'launch_app', {'app_id': 'gcompris'})
+
+    def missing(argv):
+        raise FileNotFoundError('gcompris-qt')
+
+    runtime.launcher = missing
+    assert 'error' in runtime.run_tool(live, 'launch_app', {'app_id': 'gcompris', 'activity': 'memory'})
+    assert live.screen == 'home'
+    assert live.app_pid is None
+
+
+def test_shipped_suite_includes_described_letter_games():
+    from schoolbookd.content.apps import build_argv, load_manifests
+
+    manifest = load_manifests(Path('apps.d'))['gcompris']
+    activities = {a.id: a for a in manifest.activities}
+    assert len(activities) == 196
+    assert 'falling letters' in activities['gletters'].description
+    assert 'train' in activities['click_on_letter'].description
+    assert 'train' in activities['click_on_letter_up'].description
+    assert build_argv(manifest, 'gletters')[-2:] == ['--launch', 'gletters']
+    assert '--renderer=software' in manifest.exec

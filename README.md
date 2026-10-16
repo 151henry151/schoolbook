@@ -92,6 +92,16 @@ The **Wi-Fi** button at the top right opens connection status and nearby network
 
 
 
+## GCompris activities on Debian / the CF-30
+
+Install `gcompris-qt` (including its matching `gcompris-qt-data` dependency) and `python3-tk` with the system package manager. Run `python3 packaging/setup-gcompris.py` **as the account running the kiosk** (currently root on the CF-30). It installs and checks the official English and US English voices, word images, and music resource packs, configures US English speech, disables background music and startup downloads, and preserves activity progress. Assets remain available offline. Rerun it to refresh those assets.
+
+The shipped manifest describes all 196 activities in Debian Trixie's GCompris 25.0.12. The tutor selects a manifest activity and launches `gcompris-qt --enable-kioskmode -f --renderer=software --launch ACTIVITY`. Debian's `/usr/games` is searched even if absent from the service PATH. Only installed applications are advertised. A missing activity is rejected instead of opening the suite's landing page.
+
+Ask for “the falling letters typing game” (`gletters`) or “the train game that says a letter” (`click_on_letter`; `click_on_letter_up` uses capitals). The tutor can search activity titles and descriptions. The full suite is installed locally; the tutor launches one chosen activity directly. GCompris's Home button exits a directly launched activity. Schoolbook also supplies a red **×** at the bottom right, leaving the top-right repeat-letter speaker unobstructed. Exiting either way returns to the tutor and restores listening. F11 still restarts the kiosk if needed.
+
+Launching or exiting an activity does **not** prove the child completed it. Requiring learning activities before music/videos is not enabled; reliable activity-completion reporting and parent-configured requirements would be needed before adding that feature.
+
 ## License
 
 GPL-3.0-or-later. See [LICENSE](LICENSE) and [NOTICE](NOTICE).

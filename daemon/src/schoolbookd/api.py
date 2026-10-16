@@ -446,6 +446,8 @@ def child_app(host: Host) -> FastAPI:
                     speech.set_media_playing(True)
                 elif action in {"stop", "destroy", "pause"}:
                     speech.set_media_playing(False)
+            if speech is not None and message.get("type") == "launch":
+                speech.set_media_playing(True)
             if message.get("type") == "transcript" and not message.get("partial"):
                 host.note_transcript(str(message.get("role", "tutor")), str(message.get("text", "")))
             await socket.send_json(message)
@@ -464,11 +466,20 @@ def child_app(host: Host) -> FastAPI:
             async def notify() -> None:
                 await socket.send_json({"type": "app", "action": "stop"})
                 if speech is not None:
+                    speech.set_media_playing(False)
                     speech.reset(speech.attempt_id)
 
             loop.call_soon_threadsafe(lambda: asyncio.create_task(notify()))
 
         host.runtime.on_app_exit = app_exited
+
+        async def watch_app() -> None:
+            while True:
+                await asyncio.sleep(0.5)
+                if host.live is not None:
+                    host.runtime.check_app_exit(host.live)
+
+        app_watcher = asyncio.create_task(watch_app())
         try:
             while True:
                 try:
@@ -529,6 +540,7 @@ def child_app(host: Host) -> FastAPI:
                     host.runtime.stop_app(host.ensure_live(), notify=False)
                     await socket.send_json({"type": "app", "action": "stop"})
                     if speech is not None:
+                        speech.set_media_playing(False)
                         speech.reset(speech.attempt_id)
                 elif incoming.type == "video_ui":
                     live = host.ensure_live()
@@ -565,6 +577,8 @@ def child_app(host: Host) -> FastAPI:
                         }
                     )
         finally:
+            app_watcher.cancel()
+            await asyncio.gather(app_watcher, return_exceptions=True)
             host.runtime.on_app_exit = None
             host.picture_talk = None
             host.picture_emit = None

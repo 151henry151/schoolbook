@@ -1,79 +1,1294 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# SPDX-FileCopyrightText: GCompris contributors
+# SPDX-FileCopyrightText: 2026 Schoolbook contributors
+# GCompris 25.0.12 activity IDs and descriptions from its installed metadata.
 id: gcompris
 name: GCompris
-exec: [gcompris-qt, --enable-kioskmode, -f]
-activity_arg: ["--launch", "{activity}"]
-level_arg: ["--start-level", "{level}"]
+exec:
+- gcompris-qt
+- --enable-kioskmode
+- -f
+- --renderer=software
+activity_arg:
+- --launch
+- '{activity}'
+level_arg:
+- --start-level
+- '{level}'
 observe: true
 activities:
-  - id: enumerate
-    title: Count the items
-    skills: [math.counting.to20, counting]
-    ages: [4, 7]
-  - id: number_sequence
-    title: Number sequence
-    skills: [math.counting.to20, counting]
-    ages: [4, 8]
-  - id: adjacent_numbers
-    title: Adjacent numbers
-    skills: [math.counting.to20, counting]
-    ages: [5, 8]
-  - id: smallnumbers
-    title: Small numbers
-    skills: [math.counting.to20, counting]
-    ages: [4, 7]
-  - id: algebra_plus
-    title: Addition practice
-    skills: [math.addition.within10]
-    ages: [5, 8]
-  - id: click_on_letter
-    title: Click on a letter
-    skills: [letters]
-    ages: [4, 7]
-  - id: alphabet-sequence
-    title: Alphabet sequence
-    skills: [letters]
-    ages: [4, 7]
-  - id: drawletters
-    title: Draw letters
-    skills: [letters]
-    ages: [4, 8]
-  - id: memory
-    title: Memory cards
-    skills: [memory]
-    ages: [4, 8]
-  - id: colors
-    title: Colors
-    skills: [colors]
-    ages: [3, 7]
-  - id: maze
-    title: Maze
-    skills: [maze]
-    ages: [5, 8]
-  - id: melody
-    title: Melody
-    skills: [music]
-    ages: [4, 8]
-  - id: erase
-    title: Erase
-    ages: [3, 6]
-  - id: clickgame
-    title: Click on me
-    ages: [2, 6]
-  - id: geography
-    title: Geography
-    ages: [5, 8]
-  - id: clockgame
-    title: Clock
-    ages: [5, 8]
-  - id: money
-    title: Money
-    ages: [5, 8]
-  - id: baby_tangram
-    title: Tangram
-    ages: [4, 7]
-  - id: explore_farm_animals
-    title: Farm animals
-    ages: [4, 8]
-  - id: left_right_click
-    title: Left and right click
-    ages: [4, 7]
+- id: adjacent_numbers
+  title: Find the adjacent numbers
+  skills:
+  - math.counting.to20
+  - counting
+  - math
+  - numeration
+  ages:
+  - 5
+  - 8
+  description: Find the missing adjacent numbers.
+- id: advanced_colors
+  title: Advanced colors
+  description: Select the butterfly of the correct color.
+  skills:
+  - reading
+  - colors
+  - vocabulary
+- id: algebra_by
+  title: Multiplication of numbers
+  description: Practice the multiplication operation.
+  skills:
+  - math
+  - multiplication
+  - arithmetic
+- id: algebra_div
+  title: Division of numbers
+  description: Practice the division operation.
+  skills:
+  - math
+  - division
+  - arithmetic
+- id: algebra_minus
+  title: Subtraction of numbers
+  description: Practice the subtraction operation.
+  skills:
+  - math
+  - subtraction
+  - arithmetic
+- id: algebra_plus
+  title: Addition of numbers
+  skills:
+  - math.addition.within10
+  - math
+  - addition
+  - arithmetic
+  ages:
+  - 5
+  - 8
+  description: Practice the addition of numbers.
+- id: algorithm
+  title: Logical associations
+  description: Complete the arrangement of fruits.
+  skills:
+  - discovery
+  - logic
+- id: align4
+  title: Align four (against Tux)
+  description: Line up four tokens.
+  skills:
+  - strategy
+- id: align4_2players
+  title: Align four (with a friend)
+  description: Line up four tokens.
+  skills:
+  - strategy
+- id: alphabet-sequence
+  title: Alphabet sequence
+  skills:
+  - letters
+  - reading
+  ages:
+  - 4
+  - 7
+  description: Move the helicopter to catch the clouds following the order of the alphabet.
+- id: analog_electricity
+  title: Analog electricity
+  description: Create and simulate an analog electric schema.
+  skills:
+  - sciences
+  - experiment
+- id: baby_keyboard
+  title: My first keyboard
+  description: A simple activity to discover the keyboard.
+  skills:
+  - computer
+  - keyboard
+  - letters
+  - numeration
+- id: baby_mouse
+  title: My first mouse
+  description: Move the mouse or touch the screen and observe the result.
+  skills:
+  - computer
+  - mouse
+- id: baby_tangram
+  title: Simple puzzle
+  ages:
+  - 4
+  - 7
+  description: Match the objects with their shapes.
+  skills:
+  - puzzle
+- id: baby_wordprocessor
+  title: My first word processor
+  description: Write your first texts.
+  skills:
+  - computer
+  - keyboard
+  - reading
+  - letters
+- id: babymatch
+  title: Matching items
+  description: Drag and drop the items to match them.
+  skills:
+  - reading
+  - vocabulary
+- id: babyshapes
+  title: Complete the puzzle
+  description: Drag and drop the shapes on their respective targets.
+  skills:
+  - computer
+- id: balancebox
+  title: Balance box
+  description: Navigate the ball to the door by tilting the box.
+  skills:
+  - mobile
+  - fun
+- id: ballcatch
+  title: Make the ball go to Tux
+  description: Press the left and right arrow keys at the same time, to make the ball go in a straight
+    line.
+  skills:
+  - computer
+  - keyboard
+- id: bargame
+  title: Bargame (against Tux)
+  description: Anticipate and force the other player to place a ball in the last hole.
+  skills:
+  - strategy
+- id: bargame_2players
+  title: Bargame (with a friend)
+  description: Anticipate and force the other player to place a ball in the last hole.
+  skills:
+  - strategy
+- id: binary_bulb
+  title: Binary bulbs
+  description: This activity helps you to learn the concept of conversion from decimal number system to
+    binary number system.
+  skills:
+  - sciences
+  - experiment
+- id: braille_alphabets
+  title: Discover the braille system
+  description: Learn and memorize the braille system.
+  skills:
+  - reading
+  - letters
+  - braille
+- id: braille_fun
+  title: Braille fun
+  description: Practice braille letters.
+  skills:
+  - reading
+  - braille
+  - letters
+- id: calcudoku
+  title: Calcudoku
+  description: Solve the Calcudoku.
+  skills:
+  - math
+  - arithmetic
+- id: calendar
+  title: Calendar
+  description: Read the instructions and select the correct date on the calendar.
+  skills:
+  - math
+  - measures
+- id: canal_lock
+  title: Operate a canal lock
+  description: Tux is in trouble, and needs to take his boat through a lock. Help Tux and find out how
+    a canal lock works.
+  skills:
+  - sciences
+  - experiment
+- id: categorization
+  title: Categorization
+  description: Categorize the items into correct and incorrect groups.
+  skills:
+  - reading
+  - vocabulary
+- id: checkers
+  title: Play checkers (against Tux)
+  description: Capture all your opponent's pieces before your opponent captures all of yours.
+  skills:
+  - strategy
+- id: checkers_2players
+  title: Play checkers (with a friend)
+  description: Capture all your opponent's pieces before your opponent captures all of yours.
+  skills:
+  - strategy
+- id: chess
+  title: Play chess (against Tux)
+  description: Discover and practice chess.
+  skills:
+  - strategy
+- id: chess_2players
+  title: Play chess (with a friend)
+  description: Discover and practice chess.
+  skills:
+  - strategy
+- id: chess_partyend
+  title: End of chess game
+  description: Play the end of a chess game against Tux.
+  skills:
+  - strategy
+- id: chronos
+  title: Chronos
+  description: Drag and Drop the items to organize the story.
+  skills:
+  - sciences
+  - history
+- id: click_on_letter
+  title: Click on a lowercase letter
+  skills:
+  - letters
+  - reading
+  ages:
+  - 4
+  - 7
+  description: Listen to the spoken English letter name and choose the matching letter on the train.
+- id: click_on_letter_up
+  title: Click on an uppercase letter
+  description: Listen to the spoken English letter name and choose the matching letter on the train.
+  skills:
+  - reading
+  - letters
+- id: clickanddraw
+  title: Click and draw
+  description: Draw the picture by clicking on the selected points.
+  skills:
+  - computer
+  - mouse
+- id: clickgame
+  title: Click on me
+  ages:
+  - 2
+  - 6
+  description: Catch all the swimming fish before they leave the fish tank.
+  skills:
+  - computer
+  - mouse
+- id: clockgame
+  title: Learning clock
+  ages:
+  - 5
+  - 8
+  description: Learn how to tell the time on an analog clock.
+  skills:
+  - math
+  - measures
+- id: color_mix
+  title: Mixing paint colors
+  description: Discover paint color mixing.
+  skills:
+  - sciences
+  - experiment
+  - color
+- id: color_mix_light
+  title: Mixing light colors
+  description: Discover light color mixing.
+  skills:
+  - sciences
+  - experiment
+  - color
+- id: colors
+  title: Colors
+  skills:
+  - colors
+  - reading
+  - color
+  - vocabulary
+  ages:
+  - 3
+  - 7
+  description: Click on the right color.
+- id: comparator
+  title: Compare numbers
+  description: Compare the numbers and choose the corresponding sign.
+  skills:
+  - math
+  - numeration
+- id: crane
+  title: Build the same model
+  description: Drive the crane and copy the model.
+  skills:
+  - puzzle
+- id: details
+  title: Find the details
+  description: Drag and Drop the shapes on their respective targets.
+  skills:
+  - discovery
+  - arts
+- id: digital_electricity
+  title: Digital electricity
+  description: Create and simulate a digital logic circuit
+  skills:
+  - sciences
+  - experiment
+- id: drawletters
+  title: Draw letters
+  skills:
+  - letters
+  - reading
+  ages:
+  - 4
+  - 8
+  description: Connect the dots to draw the letters.
+- id: drawnumbers
+  title: Draw numbers
+  description: Connect the dots to draw numbers from 0 to 9.
+  skills:
+  - math
+  - numeration
+- id: enumerate
+  title: Count the items
+  skills:
+  - math.counting.to20
+  - counting
+  - math
+  - numeration
+  ages:
+  - 4
+  - 7
+  description: Place the items in the best way to count them.
+- id: erase
+  title: Move the mouse or touch the screen
+  ages:
+  - 3
+  - 6
+  description: Move the mouse or touch the screen to erase the blocks and discover the hidden picture.
+  skills:
+  - computer
+  - mouse
+- id: erase_2clic
+  title: Double tap or double click
+  description: Double tap or double click to erase the blocks and discover the hidden picture.
+  skills:
+  - computer
+  - mouse
+- id: erase_clic
+  title: Click or tap
+  description: Click or tap to erase the blocks and discover the hidden picture.
+  skills:
+  - computer
+  - mouse
+- id: explore_farm_animals
+  title: Explore farm animals
+  ages:
+  - 4
+  - 8
+  description: Learn about farm animals, what sounds they make, and interesting facts.
+  skills:
+  - sciences
+  - experiment
+- id: explore_monuments
+  title: Explore monuments
+  description: Explore monuments around the world.
+  skills:
+  - sciences
+  - geography
+- id: explore_world_animals
+  title: Explore world animals
+  description: Learn about world animals, interesting facts and their location on a map.
+  skills:
+  - sciences
+  - experiment
+- id: explore_world_music
+  title: Explore world music
+  description: Learn about the music of the world.
+  skills:
+  - discovery
+  - music
+- id: family
+  title: Family
+  description: Select the name you should call this family member.
+  skills:
+  - sciences
+  - history
+- id: family_find_relative
+  title: Point the relatives
+  description: Select two people which have the given relationship.
+  skills:
+  - sciences
+  - history
+- id: fifteen
+  title: The fifteen game
+  description: Move each item to recreate the image.
+  skills:
+  - discovery
+  - logic
+- id: find_the_day
+  title: Find the day
+  description: Find the correct date and select it on the calendar.
+  skills:
+  - math
+  - measures
+- id: followline
+  title: Control the hose-pipe
+  description: The fireman needs to stop the fire, but the hose is blocked.
+  skills:
+  - computer
+  - mouse
+- id: football
+  title: The football game
+  description: Kick the ball into the goal.
+  skills:
+  - fun
+- id: fractions_create
+  title: Create the fractions
+  description: Select the appropriate number of parts to represent the given fraction.
+  skills:
+  - math
+  - arithmetic
+- id: fractions_find
+  title: Find the fractions
+  description: Find the correct numerator and denominator of the represented fraction.
+  skills:
+  - math
+  - arithmetic
+- id: frieze
+  title: Frieze
+  description: Reproduce and complete the frieze.
+  skills:
+  - discovery
+  - logic
+- id: geo-country
+  title: Locate the region
+  description: Place the regions on the country maps.
+  skills:
+  - sciences
+  - geography
+- id: geography
+  title: Locate the countries
+  ages:
+  - 5
+  - 8
+  description: Place the continents and countries on the world map.
+  skills:
+  - sciences
+  - geography
+- id: gletters
+  title: Simple letters
+  description: Type falling letters before they reach the ground. Keyboard typing practice.
+  skills:
+  - computer
+  - keyboard
+  - reading
+  - letters
+- id: gnumch-equality
+  title: Gnumch equality
+  description: Guide the Number Muncher to the expressions that equal the number at the bottom of the
+    screen.
+  skills:
+  - math
+  - arithmetic
+- id: gnumch-factors
+  title: Gnumch factors
+  description: Guide the Number Muncher to all the factors of the number at the bottom of the screen.
+  skills:
+  - math
+  - arithmetic
+- id: gnumch-inequality
+  title: Gnumch inequality
+  description: Guide the Number Muncher to all the expressions that do not equal the number at the bottom
+    of the screen.
+  skills:
+  - math
+  - arithmetic
+- id: gnumch-multiples
+  title: Gnumch multiples
+  description: Guide the Number Muncher to all the multiples of the number at the bottom of the screen.
+  skills:
+  - math
+  - arithmetic
+- id: gnumch-primes
+  title: Gnumch primes
+  description: Guide the Number Muncher to all the prime numbers.
+  skills:
+  - math
+  - arithmetic
+- id: graduated_line_read
+  title: Read a graduated line
+  description: Read values on a graduated line.
+  skills:
+  - math
+  - numeration
+- id: graduated_line_use
+  title: Use a graduated line
+  description: Place values on a graduated line.
+  skills:
+  - math
+  - numeration
+- id: grammar_analysis
+  title: Grammatical analysis
+  description: Identify grammatical classes in the given sentences.
+  skills:
+  - reading
+  - words
+- id: grammar_classes
+  title: Grammatical classes
+  description: Identify grammatical classes in the given sentences.
+  skills:
+  - reading
+  - words
+- id: graph-coloring
+  title: Graph coloring
+  description: Color the graph so that no two adjacent nodes have the same color.
+  skills:
+  - discovery
+  - logic
+- id: gravity
+  title: Gravity
+  description: Introduction to the concept of gravity.
+  skills:
+  - sciences
+  - experiment
+- id: guess24
+  title: Guess 24
+  description: Calculate to find 24.
+  skills:
+  - math
+  - arithmetic
+- id: guesscount
+  title: Guesscount
+  description: Find the operations to get the required result.
+  skills:
+  - math
+  - arithmetic
+- id: guessnumber
+  title: Guess a number
+  description: Help Tux escape the cave by finding the hidden number.
+  skills:
+  - math
+  - numeration
+- id: hangman
+  title: The classic hangman game
+  description: Guess the letters of the given word.
+  skills:
+  - keyboard
+  - reading
+  - words
+- id: hanoi
+  title: Simplified Tower of Hanoi
+  description: Copy the tower on the right-hand side onto the empty peg.
+  skills:
+  - discovery
+  - logic
+- id: hanoi_real
+  title: The Tower of Hanoi
+  description: Move the tower from the left-hand side onto the right-side peg.
+  skills:
+  - discovery
+  - logic
+- id: hexagon
+  title: Hexagon
+  description: Find the strawberry by clicking on the blue fields.
+  skills:
+  - fun
+- id: imagename
+  title: Name the image
+  description: Drag and Drop each item above its name.
+  skills:
+  - reading
+  - words
+- id: instruments
+  title: Music instruments
+  description: Click on the correct musical instruments.
+  skills:
+  - discovery
+  - music
+- id: land_safe
+  title: Land safe
+  description: Pilot the spaceship towards the green landing area.
+  skills:
+  - sciences
+  - experiment
+- id: lang
+  title: Enrich your vocabulary
+  description: Complete language learning activities.
+  skills:
+  - reading
+  - vocabulary
+- id: learn_additions
+  title: Learn addition
+  description: Learn addition with small numbers.
+  skills:
+  - math
+  - arithmetic
+- id: learn_decimals
+  title: Learn decimal numbers
+  description: Represent the given decimal numbers.
+  skills:
+  - math
+  - numeration
+- id: learn_decimals_additions
+  title: Addition with decimal numbers
+  description: Learn addition with decimal numbers.
+  skills:
+  - math
+  - arithmetic
+- id: learn_decimals_subtractions
+  title: Subtraction with decimal numbers
+  description: Learn subtraction with decimal numbers.
+  skills:
+  - math
+  - arithmetic
+- id: learn_digits
+  title: Learn digits
+  description: Represent the number corresponding to the given digit.
+  skills:
+  - math
+  - numeration
+- id: learn_quantities
+  title: Learn quantities
+  description: Learn to represent a quantity of objects.
+  skills:
+  - math
+  - numeration
+- id: learn_subtractions
+  title: Learn subtraction
+  description: Learn subtraction with small numbers.
+  skills:
+  - math
+  - arithmetic
+- id: left_right_click
+  title: Mouse click training
+  ages:
+  - 4
+  - 7
+  description: Move animals to their homes using a left click or right click on your mouse.
+  skills:
+  - computer
+  - mouse
+- id: leftright
+  title: Find your left and right hands
+  description: Determine if a hand is a right or a left hand.
+  skills:
+  - puzzle
+- id: letter-in-word
+  title: Letter in which word
+  description: Find the words with the given letter.
+  skills:
+  - reading
+  - words
+- id: lightsoff
+  title: Lights off
+  description: Turn off all the lights.
+  skills:
+  - discovery
+  - logic
+- id: louis-braille
+  title: The history of Louis Braille
+  description: Read about some key events in the life of the braille system inventor, and remember their
+    chronological order.
+  skills:
+  - sciences
+  - history
+- id: magic-hat-minus
+  title: The magician hat
+  description: Calculate how many stars are under the magic hat.
+  skills:
+  - math
+  - arithmetic
+- id: magic-hat-plus
+  title: The magician hat
+  description: Count how many stars are under the magic hat.
+  skills:
+  - math
+  - arithmetic
+- id: maze
+  title: Maze
+  skills:
+  - maze
+  - fun
+  ages:
+  - 5
+  - 8
+  description: Help Tux get out of this maze.
+- id: mazeinvisible
+  title: Invisible maze
+  description: Guide Tux out of the invisible maze.
+  skills:
+  - fun
+  - maze
+- id: mazerelative
+  title: Relative maze
+  description: Help Tux get out of this maze (moves are relative).
+  skills:
+  - fun
+  - maze
+- id: melody
+  title: Melody
+  skills:
+  - music
+  - discovery
+  - memory
+  ages:
+  - 4
+  - 8
+  description: Reproduce a sound sequence.
+- id: memory
+  title: Memory game with images
+  skills:
+  - memory
+  - fun
+  ages:
+  - 4
+  - 8
+  description: Flip the cards to find the matching pairs.
+- id: memory-case-association
+  title: Case association memory game
+  description: Flip the cards to find the uppercase and lowercase of the same letter.
+  skills:
+  - reading
+  - letters
+- id: memory-case-association-tux
+  title: Case association memory game against Tux
+  description: Flip the cards to find the uppercase and lowercase of the same letter, playing against
+    Tux.
+  skills:
+  - reading
+  - letters
+- id: memory-enumerate
+  title: Enumeration memory game
+  description: Flip the cards to match a number with a picture.
+  skills:
+  - math
+  - numeration
+- id: memory-math-add
+  title: Addition memory game
+  description: Flip the cards to match an addition with its result.
+  skills:
+  - math
+  - memory
+  - arithmetic
+- id: memory-math-add-minus
+  title: Addition and subtraction memory game
+  description: Flip the cards to match an addition or a subtraction with its result.
+  skills:
+  - math
+  - memory
+  - arithmetic
+- id: memory-math-add-minus-mult-div
+  title: All operations memory game
+  description: Flip the cards to match an operation with its result.
+  skills:
+  - math
+  - memory
+  - arithmetic
+- id: memory-math-add-minus-mult-div-tux
+  title: All operations memory game against Tux
+  description: Flip the cards to match an operation with its result, playing against Tux.
+  skills:
+  - math
+  - memory
+  - arithmetic
+- id: memory-math-add-minus-tux
+  title: Addition and subtraction memory game against Tux
+  description: Flip the cards to match an addition or a subtraction with its result, playing against Tux.
+  skills:
+  - math
+  - memory
+  - arithmetic
+- id: memory-math-add-tux
+  title: Addition memory game against Tux
+  description: Flip the cards to match an addition with its result, playing against Tux.
+  skills:
+  - math
+  - memory
+  - arithmetic
+- id: memory-math-div
+  title: Division memory game
+  description: Flip the cards to match a division with its result.
+  skills:
+  - math
+  - memory
+  - arithmetic
+- id: memory-math-div-tux
+  title: Division memory game against Tux
+  description: Flip the cards to match a division with its result, playing against Tux.
+  skills:
+  - math
+  - memory
+  - arithmetic
+- id: memory-math-minus
+  title: Subtraction memory game
+  description: Flip the cards to match a subtraction with its result.
+  skills:
+  - math
+  - memory
+  - arithmetic
+- id: memory-math-minus-tux
+  title: Subtraction memory game against Tux
+  description: Flip the cards to match a subtraction with its result, playing against Tux.
+  skills:
+  - math
+  - memory
+  - arithmetic
+- id: memory-math-mult
+  title: Multiplication memory game
+  description: Flip the cards to match a multiplication with its result.
+  skills:
+  - math
+  - memory
+  - arithmetic
+- id: memory-math-mult-div
+  title: Multiplication and division memory game
+  description: Flip the cards to match a multiplication or a division with its result.
+  skills:
+  - math
+  - memory
+  - arithmetic
+- id: memory-math-mult-div-tux
+  title: Multiplication and division memory game against Tux
+  description: Flip the cards to match a multiplication or a division with its result, playing against
+    Tux.
+  skills:
+  - math
+  - memory
+  - arithmetic
+- id: memory-math-mult-tux
+  title: Multiplication memory game against Tux
+  description: Flip the cards to match a multiplication with its result, playing against Tux.
+  skills:
+  - math
+  - memory
+  - arithmetic
+- id: memory-sound
+  title: Audio memory game
+  description: Flip the cards to match the sound pairs.
+  skills:
+  - discovery
+  - memory
+  - music
+- id: memory-sound-tux
+  title: Audio memory game against Tux
+  description: Flip the cards to match the sound pairs, playing against Tux.
+  skills:
+  - discovery
+  - memory
+  - music
+- id: memory-tux
+  title: Memory game with images against Tux
+  description: Flip the cards to find the matching pairs, playing against Tux.
+  skills:
+  - fun
+  - memory
+- id: memory-wordnumber
+  title: Wordnumber memory game
+  description: Flip the cards to match a numeral with its number name.
+  skills:
+  - math
+  - numeration
+- id: mining
+  title: Mining for gold
+  description: Use the mousewheel to approach the rockwall and look for gold nuggets.
+  skills:
+  - computer
+  - mouse
+- id: missing-letter
+  title: Missing letter
+  description: Find the missing letter to complete the word.
+  skills:
+  - reading
+  - words
+- id: money
+  title: Money
+  ages:
+  - 5
+  - 8
+  description: Practice money usage.
+  skills:
+  - math
+  - money
+  - measures
+- id: money_back
+  title: Give Tux his change
+  description: Practice money usage by giving Tux his change.
+  skills:
+  - math
+  - money
+  - measures
+- id: money_back_cents
+  title: Give Tux his change, including cents
+  description: Practice money usage by giving Tux his change.
+  skills:
+  - math
+  - money
+  - measures
+- id: money_cents
+  title: Money with cents
+  description: Practice money usage including cents.
+  skills:
+  - math
+  - money
+  - measures
+- id: morse_code
+  title: Discover the International Morse code
+  description: Communicate with the International Morse code.
+  skills:
+  - reading
+  - letters
+- id: mosaic
+  title: Rebuild the mosaic
+  description: Put each item at the same place as in the given example.
+  skills:
+  - puzzle
+- id: nine_men_morris
+  title: Nine men's morris (against Tux)
+  description: Play the game Nine men's morris against Tux.
+  skills:
+  - strategy
+- id: nine_men_morris_2players
+  title: Nine men's morris (with a friend)
+  description: Play the game Nine men's morris with a friend.
+  skills:
+  - strategy
+- id: note_names
+  title: Name that note
+  description: Learn the names of the notes, in bass and treble clef.
+  skills:
+  - discovery
+  - music
+- id: number_sequence
+  title: Number sequence
+  skills:
+  - math.counting.to20
+  - counting
+  - math
+  - numeration
+  ages:
+  - 4
+  - 8
+  description: Select the numbers one after the other according to the numerical sequence.
+- id: numbers-odd-even
+  title: Even and odd numbers
+  description: Move the helicopter to catch the clouds having even or odd numbers.
+  skills:
+  - math
+  - numeration
+- id: ordering_alphabets
+  title: Ordering letters
+  description: Arrange the given letters in alphabetical order or in reverse alphabetical order as requested.
+  skills:
+  - reading
+  - letters
+- id: ordering_chronology
+  title: Ordering chronology
+  description: Arrange the given events in their chronological order.
+  skills:
+  - discovery
+  - logic
+- id: ordering_numbers
+  title: Ordering numbers
+  description: Arrange the given numbers in ascending or descending order as requested.
+  skills:
+  - math
+  - numeration
+- id: ordering_sentences
+  title: Ordering sentences
+  description: Arrange the given words to form a meaningful sentence.
+  skills:
+  - reading
+  - words
+- id: oware
+  title: Play oware (against Tux)
+  description: Play the Oware strategy game against Tux.
+  skills:
+  - strategy
+- id: oware_2players
+  title: Play oware (with a friend)
+  description: Play the Oware strategy game with a friend.
+  skills:
+  - strategy
+- id: paintings
+  title: Assemble the puzzle
+  description: Drag and Drop the pieces to rebuild the original paintings.
+  skills:
+  - discovery
+  - arts
+  - puzzle
+- id: path_decoding
+  title: Path decoding
+  description: Follow the given directions to help Tux reach the target.
+  skills:
+  - discovery
+  - logic
+- id: path_decoding_relative
+  title: Relative path decoding
+  description: Follow the given directions to help Tux reach the target.
+  skills:
+  - discovery
+  - logic
+- id: path_encoding
+  title: Path encoding
+  description: Move Tux along the path to reach the target.
+  skills:
+  - discovery
+  - logic
+- id: path_encoding_relative
+  title: Relative path encoding
+  description: Move Tux along the path to reach the target.
+  skills:
+  - discovery
+  - logic
+- id: penalty
+  title: Penalty kick
+  description: Double click or double tap on any side of the goal in order to score.
+  skills:
+  - computer
+  - mouse
+- id: photo_hunter
+  title: Photo hunter
+  description: Find the differences between the two pictures.
+  skills:
+  - fun
+- id: piano_composition
+  title: Piano composition
+  description: Learn how the piano keyboard works, and how notes are written on a musical staff.
+  skills:
+  - discovery
+  - music
+- id: planegame
+  title: Numerical order
+  description: Move the helicopter to catch the clouds in the correct order.
+  skills:
+  - math
+  - numeration
+- id: play_piano
+  title: Play piano
+  description: Read the score, and then play it on the keyboard.
+  skills:
+  - discovery
+  - music
+- id: play_rhythm
+  title: Play rhythm
+  description: Follow the rhythm accurately.
+  skills:
+  - discovery
+  - music
+- id: positions
+  title: Positions
+  description: Find the boy's position in relation to the box.
+  skills:
+  - discovery
+  - logic
+- id: programmingMaze
+  title: Program the path
+  description: Program the path to help Tux catch the fish.
+  skills:
+  - fun
+- id: railroad
+  title: Railroad
+  description: Rebuild the train model at the top of the screen.
+  skills:
+  - discovery
+  - logic
+- id: readingh
+  title: Horizontal reading practice
+  description: Read a list of words and say if a given word is in it.
+  skills:
+  - reading
+  - words
+- id: readingv
+  title: Vertical reading practice
+  description: Read a vertical list of words and say if a given word is in it.
+  skills:
+  - reading
+  - words
+- id: redraw
+  title: Redraw the given image
+  description: Draw perfectly the given image on the empty grid.
+  skills:
+  - puzzle
+- id: redraw_symmetrical
+  title: Mirror the given image
+  description: Reproduce the image symmetrically on the empty grid.
+  skills:
+  - puzzle
+- id: renewable_energy
+  title: Renewable energy
+  description: Tux has come back from fishing on his boat. Bring the electrical system back up so he can
+    have light in his home.
+  skills:
+  - sciences
+  - experiment
+- id: reversecount
+  title: Count intervals
+  description: Tux is hungry. Help him find fish by counting to the correct ice spot.
+  skills:
+  - math
+  - numeration
+- id: roman_numerals
+  title: Roman numerals
+  description: Learn to read and write Roman numerals.
+  skills:
+  - sciences
+  - history
+- id: scalesboard
+  title: Balance the scales properly
+  description: Drag and Drop some weights to balance the scales.
+  skills:
+  - math
+  - measures
+- id: scalesboard_weight
+  title: Balance using the International System of Units
+  description: Drag and Drop some masses to balance the scales and calculate the weight.
+  skills:
+  - math
+  - measures
+- id: scalesboard_weight_avoirdupois
+  title: Balance using the imperial system of units
+  description: Drag and Drop some masses to balance the scales and calculate the weight.
+  skills:
+  - math
+  - measures
+- id: share
+  title: Share pieces of candy
+  description: Try to split the pieces of candy between a given number of children.
+  skills:
+  - math
+  - arithmetic
+- id: simplepaint
+  title: Draw in a grid
+  description: Create your own drawing.
+  skills:
+  - discovery
+  - arts
+  - fun
+- id: sketch
+  title: Sketch
+  description: Use the various digital painting tools to draw images.
+  skills:
+  - discovery
+  - arts
+  - fun
+- id: smallnumbers
+  title: Numbers with dice
+  skills:
+  - math.counting.to20
+  - counting
+  - computer
+  - keyboard
+  - math
+  - numeration
+  ages:
+  - 4
+  - 7
+  description: Count the number of dots on the dice before it reaches the ground.
+- id: smallnumbers2
+  title: Numbers with dominoes
+  description: Count the number of dots on the domino before it reaches the ground.
+  skills:
+  - math
+  - numeration
+- id: solar_system
+  title: Solar system
+  description: Learn about the solar system.
+  skills:
+  - sciences
+  - experiment
+- id: submarine
+  title: Pilot a submarine
+  description: Drive the submarine to the end point.
+  skills:
+  - sciences
+  - experiment
+- id: sudoku
+  title: Sudoku
+  description: Solve the Sudoku.
+  skills:
+  - discovery
+  - logic
+- id: superbrain
+  title: Super brain
+  description: Tux has hidden several items. Find them in the correct order.
+  skills:
+  - discovery
+  - logic
+- id: tangram
+  title: The tangram puzzle game
+  description: Move the objects to reproduce the given shape.
+  skills:
+  - puzzle
+- id: target
+  title: Practice addition with a target game
+  description: Throw darts at a target and count your score.
+  skills:
+  - math
+  - addition
+  - arithmetic
+- id: tens_complement_calculate
+  title: Calculate with ten's complement
+  description: Swap the numbers to create pairs equal to ten and input the answer of the final sum.
+  skills:
+  - math
+  - arithmetic
+- id: tens_complement_find
+  title: Find ten's complement
+  description: Find the ten's complement of each number.
+  skills:
+  - math
+  - arithmetic
+- id: tens_complement_swap
+  title: Swap ten's complement
+  description: Swap the numbers to create pairs equal to ten.
+  skills:
+  - math
+  - arithmetic
+- id: tens_complement_use
+  title: Use ten's complement
+  description: Use a ten's complement to simplify the operation.
+  skills:
+  - math
+  - arithmetic
+- id: tic_tac_toe
+  title: Tic tac toe (against Tux)
+  description: Place three marks in a row.
+  skills:
+  - strategy
+- id: tic_tac_toe_2players
+  title: Tic tac toe (with a friend)
+  description: Place three marks in a row.
+  skills:
+  - strategy
+- id: traffic
+  title: A sliding-block puzzle game
+  description: Remove the red car from the parking lot through the gate on the right.
+  skills:
+  - discovery
+  - logic
+- id: vertical_addition
+  title: Vertical addition
+  description: Solve the given addition.
+  skills:
+  - math
+  - arithmetic
+- id: vertical_subtraction
+  title: Vertical subtraction
+  description: Solve the given subtraction.
+  skills:
+  - math
+  - arithmetic
+- id: vertical_subtraction_compensation
+  title: Vertical subtraction (compensation)
+  description: Solve the given subtraction.
+  skills:
+  - math
+  - arithmetic
+- id: watercycle
+  title: Watercycle
+  description: Tux has come back from fishing on his boat. Bring the water system back up so he can take
+    a shower.
+  skills:
+  - sciences
+  - experiment
+- id: wordsgame
+  title: Falling words
+  description: Type the falling words before they reach the ground.
+  skills:
+  - computer
+  - keyboard
+  - reading
+  - words

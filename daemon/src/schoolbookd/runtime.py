@@ -70,6 +70,7 @@ class Runtime:
     images_dir: Path | None = None
     launcher: Callable[[list[str]], int] | None = None
     killer: Callable[[int], None] | None = None
+    app_running: Callable[[int], bool] | None = None
     overlay: Callable[[Callable[[], None]], Callable[[], None]] | None = None
     on_app_exit: Callable[[], None] | None = None
     _hide_overlay: Callable[[], None] | None = field(default=None, init=False, repr=False)
@@ -252,6 +253,11 @@ class Runtime:
         if notify and self.on_app_exit is not None:
             self.on_app_exit()
 
+    def check_app_exit(self, live: LiveState) -> None:
+        if (live.app_pid is not None and self.app_running is not None
+                and not self.app_running(live.app_pid)):
+            self.stop_app(live)
+
     def kill_app(self, pid: int) -> None:
         if self.killer is not None:
             self.killer(pid)
@@ -270,7 +276,9 @@ class Runtime:
             if manifest.id != "gcompris":
                 continue
             for activity in manifest.activities:
-                haystack = " ".join([activity.id, activity.title, *activity.skills]).lower()
+                haystack = " ".join([
+                    activity.id, activity.title, activity.description, *activity.skills,
+                ]).lower()
                 if needle and needle not in haystack:
                     continue
                 games.append(
@@ -278,6 +286,7 @@ class Runtime:
                         "app_id": manifest.id,
                         "activity": activity.id,
                         "title": activity.title,
+                        "description": activity.description,
                     }
                 )
         return games
@@ -404,8 +413,12 @@ class Runtime:
             activity = args.get("activity")
             activity_id = activity if isinstance(activity, str) else None
             argv = build_argv(manifest, activity_id)
+            self.stop_app(live, notify=False)
+            try:
+                pid = self.start_app(argv)
+            except OSError:
+                return {"error": "The game could not start. Ask a grown-up to check its installation."}
             live.screen = "app"
-            pid = self.start_app(argv)
             live.app_pid = pid or None
             if self.overlay is not None:
                 self._hide_overlay = self.overlay(lambda: self.stop_app(live))

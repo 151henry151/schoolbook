@@ -339,3 +339,19 @@ def test_familiar_song_queue_advances_and_close_cancels_it(tmp_path: Path) -> No
         assert socket.receive_json()["action"] == "stop"
         assert live.playing_video is None
         assert live.song_queue == []
+
+
+def test_exiting_native_game_notifies_child_without_pressing_schoolbook_close(tmp_path: Path):
+    host = _host(tmp_path)
+    runtime = host.runtime
+    runtime.launcher = lambda argv: 42
+    runtime.killer = lambda pid: None
+    running = [True]
+    runtime.app_running = lambda pid: running[0]
+    with TestClient(child_app(host)).websocket_connect('/ws') as socket:
+        socket.send_json({'type': 'hello', 'protocol_major': 1, 'token': 'boot-token'})
+        socket.receive_json()
+        runtime.run_tool(host.ensure_live(), 'launch_app', {'app_id': 'gcompris', 'activity': 'enumerate'})
+        running[0] = False
+        assert socket.receive_json() == {'type': 'app', 'action': 'stop'}
+        assert host.live.screen == 'home'

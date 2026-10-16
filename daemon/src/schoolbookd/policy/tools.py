@@ -183,7 +183,7 @@ class ToolPolicy:
             return Decision(False, "app is not allowlisted")
         activity = args.get("activity")
         if activity is None:
-            return Decision(True, "ok")
+            return Decision(app_id != "gcompris", "Select a specific activity from list_apps.")
         if not isinstance(activity, str):
             return Decision(False, "activity must be a string")
         known = ctx.app_activities.get(app_id, set())

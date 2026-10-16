@@ -6,10 +6,7 @@
 from __future__ import annotations
 
 import contextlib
-import os
 import secrets as secrets_mod
-import shutil
-import subprocess
 from pathlib import Path
 
 import yaml
@@ -21,6 +18,7 @@ from schoolbookd.content.albums import AlbumResolver
 from schoolbookd.content.apps import load_manifests
 from schoolbookd.content.catalog import CharterReviewer, SearchClient, VideoCatalog
 from schoolbookd.content.pictures import PictureMaker
+from schoolbookd.content.processes import AppProcesses, executable
 from schoolbookd.content.skills import load_skill_rows
 from schoolbookd.db.engine import backup_database, make_engine, migrate, session_factory
 from schoolbookd.db.models import Learner
@@ -44,7 +42,8 @@ def build_host(config: SchoolbookConfig, secrets: Secrets) -> Host:
     _load_images(store, config.share_dir / "images")
     _ensure_learner(store, config.etc_dir / "learner.yaml")
     learner_id = _first_learner_id(store)
-    apps = load_manifests(config.apps_dir)
+    apps = {key: app for key, app in load_manifests(config.apps_dir).items()
+            if executable(app.exec[0]) is not None}
     profile = load_age_profile(config.profiles_dir / "age-6.yaml")
     token = secrets_mod.token_urlsafe(32)
     config.data_dir.mkdir(parents=True, exist_ok=True)
@@ -54,6 +53,7 @@ def build_host(config: SchoolbookConfig, secrets: Secrets) -> Host:
         config.token_file.chmod(0o640)
     reviewer = CharterReviewer()
     youtube = _youtube(secrets)
+    processes = AppProcesses()
     runtime = Runtime(
         store=store,
         llm=_llm(config, secrets),
@@ -83,8 +83,9 @@ def build_host(config: SchoolbookConfig, secrets: Secrets) -> Host:
         pictures=_pictures(secrets, config.summary_model),
         scenes=_scenes(secrets),
         images_dir=config.images_dir,
-        launcher=_spawn_app,
-        killer=_kill_app,
+        launcher=processes.launch,
+        killer=processes.kill,
+        app_running=processes.running,
         overlay=show_close_overlay,
     )
     return Host(
@@ -186,23 +187,6 @@ def _youtube(secrets: Secrets) -> SearchClient | None:
     from schoolbookd.providers.youtube import YouTubeClient
 
     return YouTubeClient(secrets.youtube_api_key)
-
-
-def _kill_app(pid: int) -> None:
-    import signal
-
-    with contextlib.suppress(ProcessLookupError, PermissionError, OSError):
-        os.kill(pid, signal.SIGTERM)
-
-
-def _spawn_app(argv: list[str]) -> int:
-    command = list(argv)
-    if command:
-        found = shutil.which(command[0])
-        if found:
-            command[0] = found
-    process = subprocess.Popen(command, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-    return int(process.pid)
 
 
 def make_stt(config: SchoolbookConfig) -> STTProvider:

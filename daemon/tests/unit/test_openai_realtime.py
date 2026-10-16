@@ -1260,3 +1260,11 @@ def test_failed_album_lookup_after_artist_clarification_still_blocks_substitutes
                        'name': name, 'arguments': '{}'}, execute=execute)
     assert calls == ['find_album']
     assert mapper.verified_album_id == ''
+
+
+def test_described_letter_activities_are_games_not_songs():
+    for text in ['I want to play the falling letters', 'Play the train with letters',
+                 'I want the letters that drop from above']:
+        assert song_topic(text) is None
+        assert 'list_apps' in game_play_briefing(text)
+    assert song_topic('Play the song Falling Letters') == 'Falling Letters'
