@@ -86,6 +86,8 @@ Console assets and API requests use relative paths, so the same build still work
 
 Every kiosk launch (including F11 recovery) fetches a fresh entry page so Chromium cannot keep an older UI after an update. HTML entry pages are not cached; hashed scripts, styles, and fonts can still use the browser cache.
 
+On the CF-30, kiosk startup also clears the Panasonic firmware mute, which is separate from the normal Linux volume controls and can remain set after changing operating systems. It is cleared once per kiosk start, so the hardware mute key still works during use.
+
 ## License
 
 GPL-3.0-or-later. See [LICENSE](LICENSE) and [NOTICE](NOTICE).

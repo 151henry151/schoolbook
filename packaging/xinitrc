@@ -22,6 +22,14 @@ autospawn = no
 EOF
 xsetroot -solid "#f6efe2" || true
 
+# The CF-30 firmware mute is separate from ALSA/PipeWire mute and can survive
+# rebooting between operating systems. Clear it once, leaving mute keys usable.
+for hardware_mute in /sys/bus/acpi/devices/MAT0019:*/mute; do
+  if [ -w "$hardware_mute" ]; then
+    printf '0\n' > "$hardware_mute" || true
+  fi
+done
+
 pulse_ready() {
   command -v pactl >/dev/null && pactl info >/dev/null 2>&1
 }
