@@ -341,6 +341,23 @@ def test_familiar_song_queue_advances_and_close_cancels_it(tmp_path: Path) -> No
         assert live.song_queue == []
 
 
+def test_half_watched_video_event_updates_history_without_stopping_player(tmp_path: Path):
+    host = _host(tmp_path)
+    runtime = host.runtime
+    runtime.approve_video('abcdefghijk', 'Snakes', 'science', 1)
+    live = host.ensure_live()
+    runtime.run_tool(live, 'play_video', {'video_id': 'abcdefghijk'})
+    with TestClient(child_app(host)).websocket_connect('/ws') as socket:
+        socket.send_json({'type': 'hello', 'protocol_major': 1, 'token': 'boot-token'})
+        socket.receive_json()
+        socket.send_json({'type': 'video_ui', 'action': 'watched', 'video_id': 'abcdefghijk',
+                          'watched_s': 150, 'duration_s': 300})
+        socket.send_json({'type': 'ping'})
+        assert socket.receive_json()['type'] == 'pong'
+    assert live.playing_video == 'abcdefghijk'
+    assert runtime.store.video_history('kid')[0]['watch_count'] == 1
+
+
 def test_exiting_native_game_notifies_child_without_pressing_schoolbook_close(tmp_path: Path):
     host = _host(tmp_path)
     runtime = host.runtime

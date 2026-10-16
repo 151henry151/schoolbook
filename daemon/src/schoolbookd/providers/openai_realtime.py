@@ -110,6 +110,10 @@ def spoken_child_instructions(
                 "Then wait. Do not play music until he says yes. "
                 "When the child asks to watch something, treat it as a parent briefing: "
                 "you have a six-year-old who wants a video about that topic. "
+                "For general topic requests, prefer relevant videos with watch_count zero; "
+                "otherwise prefer less-watched or older videos. Search results include this history. "
+                "Use get_video_history to recall recent videos. This is a preference, not a ban: "
+                "replay a specific video when requested, and prioritize a good topic match. "
                 "Pick something educational that teaches history or science of the topic, "
                 "then call search_videos, vet_video, and play_video. "
                 "Say you will put on a video about that thing. "
@@ -765,6 +769,10 @@ def session_update(
 
 
 REALTIME_TOOLS: list[dict[str, object]] = [
+    {"type": "function", "name": "get_video_history",
+     "description": "Read this child's recently watched videos (at least 50% played). "
+                    "Prefer unseen videos for general topics; honor requests to replay a specific video.",
+     "parameters": {"type": "object", "properties": {}}},
     {
         "type": "function",
         "name": "show_board",

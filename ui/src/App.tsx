@@ -614,6 +614,7 @@ export function App() {
           key={videoId}
           videoId={videoId}
           onPlaying={() => send({ type: "video_ui", action: "playing", video_id: videoId })}
+          onWatched={(progress) => send({ type: "video_ui", action: "watched", video_id: videoId, ...progress })}
           paused={videoPaused}
           audioOnly={videoAudioOnly}
           hidden={Boolean(pictureId || pictureLoading)}

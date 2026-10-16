@@ -546,6 +546,11 @@ def child_app(host: Host) -> FastAPI:
                     live = host.ensure_live()
                     if incoming.video_id and incoming.video_id != live.playing_video:
                         continue
+                    if incoming.action == "watched":
+                        host.runtime.video_watched(
+                            live, incoming.video_id, incoming.watched_s, incoming.duration_s,
+                        )
+                        continue
                     if incoming.action == "playing":
                         host.runtime.song_started(live, incoming.video_id)
                         continue

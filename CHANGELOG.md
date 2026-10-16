@@ -15,6 +15,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Remember videos after at least half their distinct content has played, excluding pauses and seeking. Give the tutor watch history and favor unseen videos for general topic requests, while allowing requested repeats.
 - Expose the full GCompris 25.0.12 activity catalog, including falling-letter typing and both spoken-letter train activities, with offline English voice/resource setup.
 - Resolve named albums by exact title and artist, verify the release tracks, and play them in album order. Failed or incomplete lookups no longer fall back to unrelated songs or narrated videos.
 - Add a top-right Wi-Fi button on the child's home and talk screens, with network selection, connection status, refresh, and a closable settings panel.

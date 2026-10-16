@@ -11,6 +11,7 @@ import {
   youtubePlayerReady,
   type PlayerTarget,
 } from "./capture";
+import { VideoWatchTracker } from "./videoWatch";
 import { hideVideoCursor, VIDEO_CURSOR_IDLE_MS } from "./cursor";
 
 export function VideoOverlay({
@@ -21,6 +22,7 @@ export function VideoOverlay({
   onClose,
   onEnded,
   onPlaying,
+  onWatched,
   onPausedChange,
   player,
 }: {
@@ -31,12 +33,17 @@ export function VideoOverlay({
   onClose: () => void;
   onEnded?: () => void;
   onPlaying?: () => void;
+  onWatched?: (progress: { watched_s: number; duration_s: number }) => void;
   onPausedChange?: (paused: boolean) => void;
   player?: PlayerTarget;
 }) {
   const frame = useRef<HTMLIFrameElement>(null);
   const audio = useRef<HTMLAudioElement>(null);
   const finished = useRef(false);
+  const watch = useRef(new VideoWatchTracker());
+  const watchedCallback = useRef(onWatched);
+  watchedCallback.current = onWatched;
+  useEffect(() => { watch.current = new VideoWatchTracker(); finished.current = false; }, [videoId]);
   const [localPaused, setLocalPaused] = useState(paused);
   const [idle, setIdle] = useState(!paused);
 
@@ -62,6 +69,9 @@ export function VideoOverlay({
     if (audioOnly) return;
     function onMessage(event: MessageEvent) {
       if (event.origin && event.origin !== "https://www.youtube-nocookie.com") return;
+      if (event.source && event.source !== frame.current?.contentWindow) return;
+      const progress = watch.current.update(event.data, performance.now());
+      if (progress) watchedCallback.current?.(progress);
       if (youtubePlayerEnded(event.data)) {
         finish("ended");
         return;

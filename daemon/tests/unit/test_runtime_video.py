@@ -141,3 +141,40 @@ def test_named_song_clears_familiar_queue(tmp_path: Path) -> None:
     assert live.song_queue
     runtime.run_tool(live, "play_video", {"video_id": "songid11111", "audio_only": True})
     assert not live.song_queue
+
+
+def test_video_history_counts_half_watched_and_prefers_unseen_without_banning_repeats(tmp_path: Path):
+    from dataclasses import replace
+
+    store = _store(tmp_path)
+    candidates = [_dinosaur(), replace(_dinosaur(), video_id='newvideo123', title='More dinosaurs')]
+    catalog = VideoCatalog(store, ScriptSearch(candidates), CharterReviewer(), CharterReviewer())
+    runtime, live = _runtime(store, catalog), _live(store)
+    runtime.run_tool(live, 'search_videos', {'query': 'dinosaurs'})
+    catalog.vet('abcdefghijk')
+    runtime.run_tool(live, 'play_video', {'video_id': 'abcdefghijk'})
+    runtime.song_started(live, 'abcdefghijk')
+    runtime.video_watched(live, 'abcdefghijk', 149, 300)
+    assert store.video_history('kid') == []
+    runtime.video_watched(live, 'stalevideo1', 150, 300)
+    runtime.video_watched(live, 'abcdefghijk', 1, 2)  # Bogus duration.
+    assert store.video_history('kid') == []
+    runtime.video_watched(live, 'abcdefghijk', 150, 300)
+    runtime.video_watched(live, 'abcdefghijk', 200, 300)
+    history = runtime.run_tool(live, 'get_video_history', {})['videos']
+    assert history[0]['watch_count'] == 1
+    assert store.familiar_songs('kid') == []
+    results = runtime.run_tool(live, 'search_videos', {'query': 'dinosaurs'})['candidates']
+    assert [v['video_id'] for v in results] == ['newvideo123', 'abcdefghijk']
+    assert results[0]['watch_count'] == 0
+    assert results[1]['watch_count'] == 1
+    assert results[1]['last_watched_at']
+    assert store.video_history('another-child') == []
+    assert 'error' not in runtime.run_tool(live, 'play_video', {'video_id': 'abcdefghijk'})
+    runtime.video_watched(live, 'abcdefghijk', 151, 300)
+    assert store.video_history('kid')[0]['watch_count'] == 2
+    reopened = Store(session_factory(make_engine(tmp_path / 'schoolbook.db')))
+    assert reopened.video_history('kid')[0]['watch_count'] == 2
+    runtime.run_tool(live, 'play_video', {'video_id': 'abcdefghijk', 'audio_only': True})
+    runtime.video_watched(live, 'abcdefghijk', 200, 300)
+    assert store.video_history('kid')[0]['watch_count'] == 2

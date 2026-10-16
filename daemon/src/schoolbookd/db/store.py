@@ -30,6 +30,7 @@ from schoolbookd.db.models import (
     ToolCall,
     Turn,
     Video,
+    VideoWatch,
 )
 from schoolbookd.learner.memory import ProfileInput, mention_interest, next_stretch
 from schoolbookd.learner.rules import SkillSnapshot, apply_outcome
@@ -447,6 +448,31 @@ class Store:
             if db.get(Video, video_id) is not None:
                 db.add(SongPlay(id=_id(), learner_id=learner_id, video_id=video_id))
                 db.commit()
+
+    def record_video_watch(self, learner_id: str, video_id: str) -> None:
+        with self.session() as db:
+            if db.get(Video, video_id) is not None:
+                db.add(VideoWatch(id=_id(), learner_id=learner_id, video_id=video_id))
+                db.commit()
+
+    def video_history(
+        self, learner_id: str, *, video_ids: list[str] | None = None, limit: int = 30,
+    ) -> list[dict[str, object]]:
+        from sqlalchemy import func
+
+        with self.session() as db:
+            stmt = (select(Video.id, Video.title, func.count(VideoWatch.id),
+                           func.max(VideoWatch.watched_at))
+                    .join(VideoWatch, VideoWatch.video_id == Video.id)
+                    .where(VideoWatch.learner_id == learner_id)
+                    .group_by(Video.id)
+                    .order_by(func.max(VideoWatch.watched_at).desc()))
+            if video_ids is not None:
+                stmt = stmt.where(Video.id.in_(video_ids))
+            rows = db.execute(stmt.limit(limit))
+            return [{"video_id": video_id, "title": title, "watch_count": count,
+                     "last_watched_at": stamp.replace(tzinfo=UTC).isoformat()}
+                    for video_id, title, count, stamp in rows]
 
     def familiar_songs(self, learner_id: str) -> list[str]:
         from sqlalchemy import func

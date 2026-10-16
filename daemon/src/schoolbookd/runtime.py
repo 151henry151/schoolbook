@@ -42,6 +42,7 @@ class LiveState:
     playing_video: str | None = None
     playing_audio_only: bool = False
     song_recorded: bool = False
+    video_recorded: bool = False
     song_queue: list[str] = field(default_factory=list)
     app_pid: int | None = None
     paused: bool = False
@@ -469,6 +470,7 @@ class Runtime:
         if name == "play_video":
             live.song_queue.clear()
             live.song_recorded = False
+            live.video_recorded = False
             live.playing_audio_only = bool(args.get("audio_only"))
             live.playing_video = str(args["video_id"])
             live.screen = "video"
@@ -502,7 +504,22 @@ class Runtime:
             if self.catalog is None:
                 return {"candidates": []}
             kind = str(args.get("kind") or "video")
-            return {"candidates": self.catalog.search(str(args["query"]), kind=kind)}
+            candidates = self.catalog.search(str(args["query"]), kind=kind)
+            if kind == "video":
+                history = {row["video_id"]: row for row in self.store.video_history(
+                    live.learner_id, video_ids=[str(v["video_id"]) for v in candidates],
+                    limit=len(candidates),
+                )}
+                candidates = [{**v, "watch_count": history.get(v["video_id"], {}).get("watch_count", 0),
+                               "last_watched_at": history.get(v["video_id"], {}).get("last_watched_at")}
+                              for v in candidates]
+                # A preference, never an exclusion: all relevant candidates remain selectable.
+                candidates.sort(key=lambda v: (int(str(v["watch_count"])),
+                                               str(v["last_watched_at"] or "")))
+            return {"candidates": candidates}
+        if name == "get_video_history":
+            return {"videos": self.store.video_history(live.learner_id),
+                    "definition": "Watched at least 50% of the video; songs are separate."}
         if name == "set_tutor_name":
             from schoolbookd.providers.openai_realtime import normalize_tutor_name
 
@@ -521,6 +538,18 @@ class Runtime:
         if live.playing_audio_only and live.playing_video == video_id and not live.song_recorded:
             self.store.record_song_play(live.learner_id, video_id)
             live.song_recorded = True
+
+    def video_watched(self, live: LiveState, video_id: str, watched_s: float, duration_s: float) -> None:
+        if live.playing_audio_only or live.playing_video != video_id or live.video_recorded:
+            return
+        video = self.store.video(video_id)
+        if video is None or duration_s <= 0 or watched_s < duration_s / 2:
+            return
+        # Check against the API duration too, allowing its rounding and minor player differences.
+        if video.duration_s > 0 and abs(duration_s - video.duration_s) > max(5, video.duration_s * 0.02):
+            return
+        self.store.record_video_watch(live.learner_id, video_id)
+        live.video_recorded = True
 
     def next_song(self, live: LiveState) -> dict[str, object] | None:
         while live.song_queue:

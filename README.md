@@ -102,6 +102,8 @@ Ask for “the falling letters typing game” (`gletters`) or “the train game 
 
 Launching or exiting an activity does **not** prove the child completed it. Requiring learning activities before music/videos is not enabled; reliable activity-completion reporting and parent-configured requirements would be needed before adding that feature.
 
+Video watch history is separate from music history. A video counts as watched only after at least 50% of its distinct content has actually played in that viewing. Pauses, buffering, seeking over content, and replaying the same short segment do not add coverage. The browser reports the halfway milestone once; the daemon checks the current video and duration before saving it per learner in SQLite. Search results include `watch_count` and `last_watched_at` and put unseen videos first. The tutor can also call `get_video_history`. This is a preference: relevant repeats remain available, especially when the child asks for a particular video. Old play counts are not converted because they do not establish half-watched completion. Migration `0003` adds `video_watches`; existing song and learner data remain intact.
+
 ## License
 
 GPL-3.0-or-later. See [LICENSE](LICENSE) and [NOTICE](NOTICE).

@@ -167,3 +167,19 @@ test("the song has a visible keyboard-accessible pause and play button", () => {
   expect(screen.getByLabelText("song").className).not.toContain("cursor-idle");
   play.mockRestore(); pause.mockRestore();
 });
+
+test('reports halfway watched from real player progress messages only once', () => {
+  const watched = vi.fn();
+  const clock = vi.spyOn(performance, 'now');
+  render(<VideoOverlay videoId="abcdefghijk" onClose={() => {}} onWatched={watched} />);
+  for (let n = 0; n <= 60; n++) {
+    clock.mockReturnValue(n * 1000);
+    act(() => window.dispatchEvent(new MessageEvent('message', {
+      origin: 'https://www.youtube-nocookie.com',
+      data: JSON.stringify({ event: 'infoDelivery', info: { currentTime: n, duration: 100, playerState: 1 } }),
+    })));
+  }
+  expect(watched).toHaveBeenCalledOnce();
+  expect(watched).toHaveBeenCalledWith({ watched_s: 50, duration_s: 100 });
+  clock.mockRestore();
+});

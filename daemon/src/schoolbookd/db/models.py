@@ -234,3 +234,13 @@ class SongPlay(Base):
     learner_id: Mapped[str] = mapped_column(ForeignKey("learners.id"), index=True)
     video_id: Mapped[str] = mapped_column(ForeignKey("videos.id"))
     played_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
+
+
+class VideoWatch(Base):
+    """One playback in which at least half the video's content was watched."""
+
+    __tablename__ = "video_watches"
+    id: Mapped[str] = mapped_column(String, primary_key=True)
+    learner_id: Mapped[str] = mapped_column(ForeignKey("learners.id"), index=True)
+    video_id: Mapped[str] = mapped_column(ForeignKey("videos.id"))
+    watched_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
