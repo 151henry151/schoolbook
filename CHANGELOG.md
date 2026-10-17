@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- Explain exhausted speech-service credit on screen instead of silently losing listening; preserve microphone retry after credit is replenished.
+
 ## [0.11.0] - 2026-10-16
 
 ### Added

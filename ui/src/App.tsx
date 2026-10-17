@@ -50,6 +50,7 @@ export function App() {
   const attemptId = useRef("");
   const mediaPlaying = useRef(false);
   const [status, setStatus] = useState<TalkStatusKind>("listening");
+  const [speechError, setSpeechError] = useState("");
   const [listenPaused, setListenPaused] = useState(false);
   const listenPausedRef = useRef(false);
   const [micEpoch, setMicEpoch] = useState(0);
@@ -112,6 +113,7 @@ export function App() {
       ws.onmessage = (event) => {
         const message = JSON.parse(String(event.data)) as {
           type: string;
+          message?: string;
           learner_name?: string;
           text?: string;
           role?: string;
@@ -140,6 +142,7 @@ export function App() {
           speaking.current = false;
           freshListen.current = true;
           setStatus("connection-error");
+          setSpeechError(message.message || "Speech connection lost. Tap the microphone to try again.");
           return;
         }
         if (listenPausedRef.current && message.type !== "hello_ok") return;
@@ -377,6 +380,7 @@ export function App() {
   }
 
   function resetListen() {
+    setSpeechError("");
     queue.current.interrupt();
     speaking.current = false;
     freshListen.current = true;
@@ -402,6 +406,7 @@ export function App() {
   }
 
   function pauseListen() {
+    setSpeechError("");
     queue.current.interrupt();
     speaking.current = false;
     freshListen.current = true;
@@ -512,6 +517,7 @@ export function App() {
         </section>
       ) : null}
       {!(videoId && !videoPaused) && !appId ? (
+        <>{speechError ? <p className="speech-error" role="alert">{speechError}</p> : null}
         <div
           className={
             (videoId && videoPaused) || pictureId || pictureLoading
@@ -570,6 +576,7 @@ export function App() {
             </svg>
           </button>
         </div>
+        </>
       ) : null}
       {dev ? (
         <form

@@ -19,6 +19,19 @@ REALTIME_MODEL = "gpt-realtime-2.1"
 REALTIME_URL = f"wss://api.openai.com/v1/realtime?model={REALTIME_MODEL}"
 
 
+class SpeechUnavailable(RuntimeError):
+    """A known speech-service failure with a message safe to show to the family."""
+
+
+def check_speech_quota(event: dict[str, object]) -> None:
+    error = event.get("error")
+    if isinstance(error, dict) and error.get("code") == "credit_balance_exhausted":
+        raise SpeechUnavailable(
+            "Speech credits have run out. A grown-up needs to add OpenAI API credit, "
+            "then tap the microphone again."
+        )
+
+
 def connect_headers(api_key: str) -> dict[str, str]:
     return {"Authorization": f"Bearer {api_key}"}
 
@@ -1483,6 +1496,8 @@ class RealtimeTalk:
         if isinstance(raw, bytes):
             raw = raw.decode()
         created = json.loads(raw)
+        if isinstance(created, dict):
+            check_speech_quota(created)
         if not isinstance(created, dict) or created.get("type") != "session.created":
             raise RuntimeError(f"realtime handshake failed: {created}")
         await self._socket.send(
@@ -1609,6 +1624,7 @@ class RealtimeTalk:
                 continue
             if not isinstance(event, dict):
                 continue
+            check_speech_quota(event)
             kind = str(event.get("type", ""))
             if self.input_paused:
                 if kind.startswith("input_audio_buffer.speech_"):

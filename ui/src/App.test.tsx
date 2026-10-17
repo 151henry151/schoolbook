@@ -740,3 +740,22 @@ test("Wi-Fi button opens the offline network picker and closes it", async () => 
   fireEvent.click(screen.getByRole("button", { name: "Close Wi-Fi settings" }));
   expect(screen.queryByRole("dialog")).toBeNull();
 });
+
+test("speech failure explains exhausted credit and a new attempt clears the message", async () => {
+  render(<App />);
+  await vi.waitFor(() => expect(sockets.length).toBe(1));
+  const socket = sockets[0];
+  fireEvent.click(screen.getByRole("button", { name: "friend" }));
+  const attempt = socket.send.mock.calls.map(([raw]) => JSON.parse(String(raw))).find((m) => m.type === "talk_start");
+  const message = "Speech credits have run out. A grown-up needs to add OpenAI API credit, then tap the microphone again.";
+  act(() => socket.onmessage?.({ data: JSON.stringify({
+    type: "error", message, attempt_id: attempt.turn_id,
+  }) } as MessageEvent));
+  expect(screen.getByRole("alert").textContent).toBe(message);
+  fireEvent.click(screen.getByRole("button", { name: "start talking" }));
+  expect(screen.queryByRole("alert")).toBeNull();
+  act(() => socket.onmessage?.({ data: JSON.stringify({
+    type: "error", message, attempt_id: attempt.turn_id,
+  }) } as MessageEvent));
+  expect(screen.queryByRole("alert")).toBeNull();
+});

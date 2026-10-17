@@ -7,9 +7,10 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import logging
 from collections.abc import Callable
 
-from schoolbookd.providers.openai_realtime import Emit, RealtimeTalk
+from schoolbookd.providers.openai_realtime import Emit, RealtimeTalk, SpeechUnavailable
 
 
 class RealtimeSession:
@@ -102,9 +103,14 @@ class RealtimeSession:
             raise ConnectionError("speech connection ended")
         except asyncio.CancelledError:
             raise
-        except Exception:
+        except Exception as exc:
+            # Log the failure category, never credentials, audio, or provider payloads.
+            logging.getLogger(__name__).warning("Speech session failed: %s", type(exc).__name__)
+            message = str(exc) if isinstance(exc, SpeechUnavailable) else (
+                "Speech connection lost. Tap the microphone to try again."
+            )
             await emit(
-                {"type": "error", "message": "Speech connection lost. Tap the microphone to try again."}
+                {"type": "error", "message": message}
             )
         finally:
             for worker in (sender, receiver):

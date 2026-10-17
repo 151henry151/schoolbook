@@ -169,3 +169,39 @@ def test_stop_cancels_album_lookup_without_waiting_for_network_thread():
             release.set()
 
     asyncio.run(run())
+
+
+def test_exhausted_credit_is_visible_and_a_fresh_attempt_can_recover() -> None:
+    async def run(handshake_failure: bool) -> None:
+        failing = Socket(handshake=not handshake_failure)
+        failing.event({'type': 'error', 'error': {
+            'type': 'insufficient_quota', 'code': 'credit_balance_exhausted',
+            'message': 'Provider diagnostic with private details',
+        }})
+        sockets = iter([failing, Socket()])
+        emitted = []
+
+        async def connect(_key: str) -> Socket:
+            return next(sockets)
+
+        async def emit(event: dict[str, object]) -> None:
+            emitted.append(event)
+
+        session = RealtimeSession(
+            lambda: RealtimeTalk('unused', 'help', lambda n, a: {}, connect), emit, lambda: None,
+        )
+        session.reset('no-credit')
+        await settle()
+        errors = [e for e in emitted if e['type'] == 'error']
+        assert len(errors) == 1
+        assert 'Speech credits have run out' in errors[0]['message']
+        assert 'private details' not in errors[0]['message']
+        assert errors[0]['attempt_id'] == 'no-credit'
+        assert failing.closed
+        session.reset('after-top-up')
+        await settle()
+        assert any(e.get('detail') == 'ready' and e['attempt_id'] == 'after-top-up' for e in emitted)
+        await session.close()
+
+    asyncio.run(run(True))
+    asyncio.run(run(False))

@@ -102,6 +102,8 @@ Ask for “the falling letters typing game” (`gletters`) or “the train game 
 
 Launching or exiting an activity does **not** prove the child completed it. Requiring learning activities before music/videos is not enabled; reliable activity-completion reporting and parent-configured requirements would be needed before adding that feature.
 
+If speech stops immediately because OpenAI reports exhausted API credit, the child screen explains that a grown-up must replenish the account at [OpenAI API billing](https://platform.openai.com/settings/organization/billing/). After adding credit, tap the microphone again; rebooting cannot fix an exhausted account. Speech connection failures also show a visible retry message.
+
 ## License
 
 GPL-3.0-or-later. See [LICENSE](LICENSE) and [NOTICE](NOTICE).

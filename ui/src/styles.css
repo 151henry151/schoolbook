@@ -117,6 +117,21 @@ button { min-height: 64px; min-width: 64px; font-size: 1.4rem; }
   text-shadow: 0 0 0.35em #ffe27a, 0 0 0.8em #ffd24a;
 }
 .status { margin: 0; font-size: 1.4rem; }
+.speech-error {
+  position: fixed;
+  left: 50%;
+  bottom: 9rem;
+  transform: translateX(-50%);
+  width: min(36rem, 85vw);
+  padding: 0.8rem 1rem;
+  border: 2px solid #b42318;
+  border-radius: 0.7rem;
+  background: #fff6ef;
+  color: #8c1c13;
+  font-size: 1.1rem;
+  text-align: center;
+  z-index: 29;
+}
 .status.in-controls {
   width: 4.8rem;
   height: 4.8rem;
