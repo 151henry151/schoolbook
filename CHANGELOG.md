@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- Give Hannah the star avatar and Arum the flower avatar on the learner chooser.
+
 ### Added
 
 - Pause listening after ten seconds of quiet while the tutor is ready for a new turn; protect active speech and tutor processing/playback, and let the child resume with the microphone button.

@@ -71,7 +71,7 @@ def prepare_runtime(root: Path, share: Path, parent_password: str) -> Path:
     learner = etc / "learner.yaml"
     if not learner.is_file():
         learner.write_text(
-            "id: kid\nfirst_name: Arum\nbirth_year: 2020\ntalk_mode: handsfree\n",
+            "id: kid\nfirst_name: Arum\nbirth_year: 2020\navatar: flower\ntalk_mode: handsfree\n",
             encoding="utf-8",
         )
     upgrade_default_learner(learner)

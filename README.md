@@ -51,7 +51,7 @@ After choosing a learner, the microphone listens until ten seconds of quiet; tap
 
 ## Learner profiles
 
-Choose **Arum** (star) or **Hannah** (flower) on the home screen. Use **Change learner** on the main talk screen to return to that chooser. Switching closes the previous conversation, stops any media or game, and starts with the selected child’s own history. The active learner is remembered across daemon restarts; the kiosk still opens to the chooser.
+Choose **Arum** (flower) or **Hannah** (star) on the home screen. Use **Change learner** on the main talk screen to return to that chooser. Switching closes the previous conversation, stops any media or game, and starts with the selected child’s own history. The active learner is remembered across daemon restarts; the kiosk still opens to the chooser.
 
 Hannah uses the **age-4** profile: short, concrete explanations, one idea at a time, no assumed reading or typing ability, and gentle preschool video searches aimed at ages 3–5. Videos are limited to 1–8 minutes; educational songs and animation are welcome. Pictures also use the learner’s age. These are selection preferences and metadata checks, not a guarantee of every video’s suitability. Arum keeps the existing age-six profile. Saved conversations, notes, learning progress, familiar songs, and watched-video records belong to each child separately.
 
