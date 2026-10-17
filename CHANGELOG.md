@@ -9,7 +9,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Pause listening after ten seconds of quiet while the tutor is ready for a new turn; protect active speech and tutor processing/playback, and let the child resume with the microphone button.
 - Record per-learner speech and transcription usage counters to help identify spending, without duplicating conversation text or credentials in usage records.
+
+### Fixed
+
+- Reject long, repetitive speech-recognition loops before saving them as child speech or sending them to the tutor. Speech errors now pause microphone capture and cancel the attempt until the child retries.
 
 ## [0.12.0] - 2026-10-16
 

@@ -741,17 +741,21 @@ test("Wi-Fi button opens the offline network picker and closes it", async () => 
   expect(screen.queryByRole("dialog")).toBeNull();
 });
 
-test("speech failure explains exhausted credit and a new attempt clears the message", async () => {
+test.each([
+  "Speech credits have run out. A grown-up needs to add OpenAI API credit, then tap the microphone again.",
+  "Could not understand that recording. Tap the microphone and try again.",
+])("speech failure pauses capture and allows a fresh attempt: %s", async (message) => {
   render(<App />);
   await vi.waitFor(() => expect(sockets.length).toBe(1));
   const socket = sockets[0];
   fireEvent.click(screen.getByRole("button", { name: "friend" }));
   const attempt = socket.send.mock.calls.map(([raw]) => JSON.parse(String(raw))).find((m) => m.type === "talk_start");
-  const message = "Speech credits have run out. A grown-up needs to add OpenAI API credit, then tap the microphone again.";
   act(() => socket.onmessage?.({ data: JSON.stringify({
     type: "error", message, attempt_id: attempt.turn_id,
   }) } as MessageEvent));
   expect(screen.getByRole("alert").textContent).toBe(message);
+  expect(screen.getByRole("img", {name: "paused"})).toBeTruthy();
+  expect(JSON.parse(String(socket.send.mock.calls.at(-1)?.[0])).type).toBe("talk_stop");
   fireEvent.click(screen.getByRole("button", { name: "start talking" }));
   expect(screen.queryByRole("alert")).toBeNull();
   act(() => socket.onmessage?.({ data: JSON.stringify({
@@ -786,4 +790,40 @@ test("selecting Hannah waits for confirmation and changing learner clears the ol
   receive({type: "learner_selected", learner_id: "arum", learner_name: "Arum", attempt_id: next.turn_id});
   receive({type: "transcript", role: "child", text: "Late Hannah speech", attempt_id: firstAttempt});
   expect(screen.queryByText("Late Hannah speech")).toBeNull();
+});
+
+test("idle pause waits for speech and the tutor, closes listening, and microphone resumes", async () => {
+  let frame: (pcm: Int16Array, dtMs: number) => void = () => {};
+  const stop = vi.fn();
+  vi.mocked(startMic).mockImplementation(async callback => { frame = callback; return stop; });
+  render(<App />);
+  await vi.waitFor(() => expect(sockets.length).toBe(1));
+  const ws = sockets[0];
+  const receive = (message: object) => act(() => ws.onmessage?.({ data: JSON.stringify(message) } as MessageEvent));
+  receive({type: "hello_ok", voice: "realtime"});
+  fireEvent.click(screen.getByRole("button", {name: "friend"}));
+  await vi.waitFor(() => expect(startMic).toHaveBeenCalled());
+  const quiet = new Int16Array(160);
+  act(() => frame(quiet, 9900));
+  act(() => frame(new Int16Array(160).fill(300), 20000)); // Quiet but active child speech.
+  expect(screen.queryByRole("img", {name: "paused"})).toBeNull();
+  receive({type: "state", name: "listening", detail: "hearing"});
+  act(() => frame(quiet, 20000)); // Server still hears speech; never cut it off.
+  expect(screen.queryByRole("img", {name: "paused"})).toBeNull();
+  receive({type: "state", name: "thinking"});
+  act(() => frame(quiet, 30000)); // Slow lookup must not be cancelled.
+  receive({type: "state", name: "listening", detail: ""});
+  await act(async () => {});
+  act(() => frame(quiet, 9900));
+  expect(screen.queryByRole("img", {name: "paused"})).toBeNull();
+  act(() => frame(quiet, 100));
+  expect(screen.getByRole("img", {name: "paused"})).toBeTruthy();
+  expect(stop).toHaveBeenCalled();
+  expect(ws.send.mock.calls.map(([raw]) => JSON.parse(String(raw))).at(-1).type).toBe("talk_stop");
+  const sent = ws.send.mock.calls.length;
+  act(() => frame(new Int16Array(160).fill(3000), 1000));
+  expect(ws.send.mock.calls.length).toBe(sent);
+  fireEvent.click(screen.getByRole("button", {name: "start talking"}));
+  expect(screen.queryByRole("img", {name: "paused"})).toBeNull();
+  expect(ws.send.mock.calls.map(([raw]) => JSON.parse(String(raw))).at(-1).type).toBe("talk_start");
 });

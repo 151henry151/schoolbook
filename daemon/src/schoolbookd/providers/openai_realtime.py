@@ -12,6 +12,7 @@ import logging
 import re
 import sys
 import time
+from collections import Counter
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from typing import Any
@@ -413,6 +414,16 @@ def video_topic(text: str) -> str | None:
 
 _SHORT_OK = {"a", "i", "no", "yes", "ok", "hi", "hey", "wow", "why", "how", "who", "what"}
 _FILLERS = {"um", "uh", "uhm", "hmm", "mm", "mmm", "ah", "er", "eh", "huh", "like"}
+
+
+def transcription_loop(text: str) -> bool:
+    """Detect long repetitive ASR failures, without rejecting ordinary repetition or long questions."""
+    words = re.findall(r"\w+", text.lower())
+    if len(words) < 200:
+        return False
+    phrases = Counter(tuple(words[i:i + 6]) for i in range(len(words) - 5))
+    repetitions = max(phrases.values(), default=0)
+    return repetitions >= 8 and repetitions * 6 >= len(words) * 0.25
 
 
 def looks_like_child_speech(text: str) -> bool:
@@ -1138,6 +1149,12 @@ class RealtimeMapper:
             discard: list[dict[str, object]] = (
                 [{"type": "conversation.item.delete", "item_id": item_id}] if item_id else []
             )
+            if transcription_loop(text):
+                return (
+                    [{"type": "error", "message":
+                      "Could not understand that recording. Tap the microphone and try again."}],
+                    [*discard, {"type": "input_audio_buffer.clear"}],
+                )
             decision, _filtered = child_speech_decision(text)
             cleaned = " ".join(text.split())  # Keep names, digits, and meaningful words intact.
             if decision == "wait":

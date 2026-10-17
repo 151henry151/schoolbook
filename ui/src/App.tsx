@@ -8,7 +8,7 @@ import { HOLD_MS, OFFLINE_APPS, holdComplete } from "./capture";
 import { armed, armIfWaiting, stepHandsFree, type HandsFreeState } from "./handsfree";
 import { createCaptureContext, startMic } from "./mic";
 import { PlaybackQueue, decodePcm16, webAudioPlayer } from "./playback";
-import { createVad, encodePcm16 } from "./pcm";
+import { createVad, encodePcm16, voiced } from "./pcm";
 import { PROTOCOL_MAJOR, type BoardElement } from "./protocol";
 import { ParentUnlock } from "./unlock";
 import { WifiButton } from "./wifi";
@@ -16,6 +16,7 @@ import { TalkLines, nextTalkPair, playbackWordIndex, type TalkPair } from "./tal
 import { PictureOverlay } from "./picture";
 import { TalkStatus, type TalkStatusKind } from "./talkStatus";
 import { VideoOverlay } from "./video";
+import { IdleListening } from "./idleListening";
 
 type Phase = "home" | "talk";
 
@@ -55,7 +56,15 @@ export function App() {
   const [connectionEpoch, setConnectionEpoch] = useState(0);
   const attemptId = useRef("");
   const mediaPlaying = useRef(false);
-  const [status, setStatus] = useState<TalkStatusKind>("listening");
+  const [status, updateStatus] = useState<TalkStatusKind>("listening");
+  const statusRef = useRef<TalkStatusKind>("listening");
+  const serverHearing = useRef(false);
+  const idleListening = useRef(new IdleListening());
+  const [idlePaused, setIdlePaused] = useState(false);
+  function setStatus(value: TalkStatusKind) {
+    statusRef.current = value;
+    updateStatus(value);
+  }
   const [speechError, setSpeechError] = useState("");
   const [listenPaused, setListenPaused] = useState(false);
   const listenPausedRef = useRef(false);
@@ -157,6 +166,7 @@ export function App() {
           return;
         }
         if (message.type === "error") {
+          pauseListen();
           setSelecting(false);
           queue.current.interrupt();
           speaking.current = false;
@@ -269,7 +279,10 @@ export function App() {
         if (message.type === "state" && message.name === "offline") setOffline(true);
         if (message.type === "state" && message.name === "home") setOffline(false);
         if (message.type === "state" && message.name === "parent_unlock") setUnlock(true);
-        if (message.type === "state" && message.name === "thinking") setStatus("thinking");
+        if (message.type === "state" && message.name === "thinking") {
+          serverHearing.current = false;
+          setStatus("thinking");
+        }
         if (message.type === "state" && message.name === "speaking") {
           if (phaseRef.current !== "talk") return;
           if (freshListen.current || listenPausedRef.current) return;
@@ -280,6 +293,8 @@ export function App() {
           if (listenPausedRef.current) return;
           const finish = () => {
             if (receivedAttempt !== attemptId.current) return;
+            serverHearing.current = message.detail === "hearing";
+            idleListening.current.reset();
             speaking.current = false;
             hands.current = armIfWaiting(hands.current);
             if (message.detail === "hearing" || message.detail === "ready") {
@@ -327,12 +342,22 @@ export function App() {
 
   useEffect(() => {
     if (phase !== "talk" || listenPaused || (videoId && !videoPaused) || appId) return;
+    idleListening.current.reset();
     let stop: (() => void) | undefined;
     let active = true;
     void startMic((pcm, dtMs) => {
       if (!active || listenPausedRef.current || mediaPlaying.current) return;
       const ws = socketRef.current;
       if (!ws || ws.readyState !== WebSocket.OPEN) return;
+      const busy = statusRef.current !== "listening" || serverHearing.current ||
+        speaking.current || !queue.current.isIdle();
+      // A conservative energy threshold protects quiet speech too. This does not gate audio
+      // sent to the service; its own VAD still determines when a sentence is complete.
+      if (idleListening.current.frame(dtMs, voiced(pcm, 220), busy)) {
+        pauseListen();
+        setIdlePaused(true);
+        return;
+      }
       if (voice === "realtime") {
         if (speaking.current || !queue.current.isIdle()) return;
         ws.send(
@@ -394,7 +419,9 @@ export function App() {
   }, [phase, voice, videoId, videoPaused, listenPaused, appId, micEpoch]);
 
   function send(message: object) {
-    socket?.send(JSON.stringify(message));
+    if (socketRef.current?.readyState === WebSocket.OPEN) {
+      socketRef.current.send(JSON.stringify(message));
+    }
   }
 
   function closePlayer(action: "done" | "ended") {
@@ -409,6 +436,9 @@ export function App() {
   }
 
   function resetListen() {
+    idleListening.current.reset();
+    serverHearing.current = false;
+    setIdlePaused(false);
     setSpeechError("");
     queue.current.interrupt();
     speaking.current = false;
@@ -435,6 +465,9 @@ export function App() {
   }
 
   function pauseListen() {
+    idleListening.current.reset();
+    serverHearing.current = false;
+    setIdlePaused(false);
     setSpeechError("");
     queue.current.interrupt();
     speaking.current = false;
@@ -576,6 +609,7 @@ export function App() {
           ))}
         </section>
       ) : null}
+      {idlePaused && !videoId && !appId ? <p className="idle-pause-note" role="status">Tap the microphone to talk again.</p> : null}
       {!(videoId && !videoPaused) && !appId ? (
         <>{speechError ? <p className="speech-error" role="alert">{speechError}</p> : null}
         <div

@@ -1277,3 +1277,17 @@ def test_preschool_video_briefing_follows_hannah_age() -> None:
     assert "snakes" in briefing
     assert "preschool" in briefing
     assert "six-year-old" not in briefing and "10-12" not in briefing
+
+
+def test_repetitive_transcription_is_not_saved_or_sent_to_the_tutor() -> None:
+    from schoolbookd.providers.openai_realtime import transcription_loop
+
+    text = "Let us look at the flowers together. " * 180
+    assert transcription_loop(text)
+    assert not transcription_loop("Please please please play a song.")
+    assert not transcription_loop(" ".join(f"word{n}" for n in range(500)))
+    mapper = RealtimeMapper()
+    ui, outbound = mapper.handle({"type": "conversation.item.input_audio_transcription.completed",
+                                 "item_id": "loop1", "transcript": text})
+    assert [item["type"] for item in ui] == ["error"]
+    assert [item["type"] for item in outbound] == ["conversation.item.delete", "input_audio_buffer.clear"]

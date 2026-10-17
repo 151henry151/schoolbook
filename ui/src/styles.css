@@ -329,3 +329,5 @@ button { min-height: 64px; min-width: 64px; font-size: 1.4rem; }
 .change-learner { position: fixed; top: 4.5rem; left: 1rem; z-index: 24; min-height: 48px; padding: .7rem 1rem; font-size: 1rem; }
 
 .home { align-content: center; padding: 6rem 1rem 2rem; box-sizing: border-box; }
+
+.idle-pause-note { position: fixed; bottom: 8.8rem; left: 0; right: 0; text-align: center; font-size: 1.1rem; }
