@@ -17,7 +17,7 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
 
-from fastapi import FastAPI, Request, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, HTTPException, Request, WebSocket, WebSocketDisconnect
 from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from sqlalchemy import select
 from starlette.responses import Response as StarletteResponse
@@ -113,6 +113,7 @@ class Host:
     picture_emit: Callable[[dict[str, object]], Awaitable[None]] | None = None
     picture_talk: RealtimeTalk | None = None
     picture_tasks: set[asyncio.Task[None]] = field(default_factory=set)
+    learner_generation: int = 0
     speech_generation: int = 0
     song_audio: Callable[[str], tuple[bytes, str]] | None = None
     wifi: Wifi | None = None
@@ -124,11 +125,36 @@ class Host:
         (self.data_dir / "kiosk.end").write_text("end\n", encoding="utf-8")
 
     def ensure_live(self) -> LiveState:
-        if self.live is None or self.runtime.store.open_session(self.learner_id) is None:
+        if (self.live is None or self.live.learner_id != self.learner_id
+                or self.runtime.store.open_session(self.learner_id) is None):
             session_id = self.runtime.store.start_session(self.learner_id, self.runtime.model)
             self.live = LiveState(session_id=session_id, learner_id=self.learner_id)
         assert self.live is not None
         return self.live
+
+    def learner_options(self) -> list[dict[str, str]]:
+        return [{"id": row.id, "first_name": row.first_name, "avatar": row.avatar}
+                for row in self.runtime.store.learners()]
+
+    def select_learner(self, learner_id: str) -> bool:
+        if self.runtime.store.learner(learner_id) is None:
+            return False
+        self.cancel_speech_work()
+        self.learner_generation += 1
+        self.cancelled_turns.update(self.buffers)
+        self.buffers.clear()
+        if self.speaking_turn:
+            self.cancelled_turns.add(self.speaking_turn)
+            self.speaking_turn = None
+        if self.live is not None:
+            self.runtime.stop_app(self.live, notify=False)
+            self.live.song_queue.clear()
+            self.live.playing_video = None
+            self.runtime.store.end_session(self.live.session_id, "learner changed", "", "")
+        self.live = None
+        self.learner_id = learner_id
+        self.runtime.store.put_setting("active_learner", learner_id, actor="system")
+        return True
 
     def login(self, password: str, now: float) -> tuple[bool, str]:
         recent = [stamp for stamp in self.attempts if now - stamp < 300]
@@ -153,17 +179,21 @@ class Host:
         buffer = self.buffers.setdefault(turn_id, ListenBuffer())
         append_pcm(buffer, pcm_b64)
 
-    def finish_talk(self, turn_id: str) -> list[dict[str, object]]:
+    def finish_talk(self, turn_id: str, live: LiveState | None = None) -> list[dict[str, object]]:
+        live = live or self.ensure_live()
+        generation = self.learner_generation
         buffer = self.buffers.pop(turn_id, ListenBuffer())
         if turn_id in self.cancelled_turns:
             return []
-        learner = self.runtime.store.learner(self.learner_id)
+        learner = self.runtime.store.learner(live.learner_id)
         hints = [learner.first_name] if learner else []
         if self.stt is None:
             text = ""
         else:
             text, _confidence = transcribe_buffer(self.stt, buffer, hints)
-        outcome = self.runtime.child_turn(self.ensure_live(), text)
+        if generation != self.learner_generation:
+            return []
+        outcome = self.runtime.child_turn(live, text)
         if turn_id in self.cancelled_turns:
             return [{"type": "state", "name": "listening", "detail": "interrupted"}]
         self.speaking_turn = turn_id
@@ -203,11 +233,13 @@ class Host:
             tutor_name = stored_name
         else:
             tutor_name = DEFAULT_TUTOR_NAME
+        profile = self.runtime.profile_for(self.learner_id)
         instructions = spoken_child_instructions(
             self.runtime.core_prompt,
-            render_age_profile(self.runtime.age_profile),
+            render_age_profile(profile),
             name,
             tutor_name=tutor_name,
+            age_years=profile.age_years,
         )
 
         loop = asyncio.get_running_loop()
@@ -229,8 +261,10 @@ class Host:
             api_key=self.openai_api_key,
             instructions=instructions,
             execute=execute,
-            tools=list(REALTIME_TOOLS),
-            mapper=RealtimeMapper(child_name=name),
+            tools=[{**tool, "description": "Search educational videos. " + profile.video_guidance}
+                   if tool.get("name") == "search_videos" else dict(tool) for tool in REALTIME_TOOLS],
+            mapper=RealtimeMapper(child_name=name, age_years=profile.age_years,
+                                  video_guidance=profile.video_guidance),
             voice=voice,
             tutor_name=tutor_name,
         )
@@ -434,12 +468,17 @@ def child_app(host: Host) -> FastAPI:
                 "type": "hello_ok",
                 "protocol_major": MAJOR,
                 "learner_name": name,
+                "learner_id": host.learner_id,
+                "learners": host.learner_options(),
                 "talk_mode": talk_mode,
                 "voice": host.voice,
             }
         )
+        learner_generation = host.learner_generation
         speech: RealtimeSession | None = None
         async def emit(message: dict[str, object]) -> None:
+            if learner_generation != host.learner_generation:
+                return
             if speech is not None and message.get("type") == "video":
                 action = message.get("action")
                 if action in {"play", "resume"}:
@@ -464,6 +503,8 @@ def child_app(host: Host) -> FastAPI:
 
         def app_exited() -> None:
             async def notify() -> None:
+                if learner_generation != host.learner_generation:
+                    return
                 await socket.send_json({"type": "app", "action": "stop"})
                 if speech is not None:
                     speech.set_media_playing(False)
@@ -476,7 +517,7 @@ def child_app(host: Host) -> FastAPI:
         async def watch_app() -> None:
             while True:
                 await asyncio.sleep(0.5)
-                if host.live is not None:
+                if host.live is not None and learner_generation == host.learner_generation:
                     host.runtime.check_app_exit(host.live)
 
         app_watcher = asyncio.create_task(watch_app())
@@ -486,7 +527,24 @@ def child_app(host: Host) -> FastAPI:
                     incoming = parse_client_message(await socket.receive_json())
                 except WebSocketDisconnect:
                     break
-                if incoming.type == "ping":
+                if learner_generation != host.learner_generation:
+                    await socket.close(code=4409)
+                    break
+                if incoming.type == "select_learner":
+                    if host.runtime.store.learner(incoming.learner_id) is None:
+                        await socket.send_json({"type": "error", "message": "Unknown learner.",
+                                                "attempt_id": incoming.turn_id})
+                        continue
+                    if speech is not None:
+                        speech.reset(incoming.turn_id, listen=False)
+                        speech.set_media_playing(False)
+                    host.select_learner(incoming.learner_id)
+                    learner_generation = host.learner_generation
+                    selected = host.runtime.store.learner(host.learner_id)
+                    await socket.send_json({"type": "learner_selected", "learner_id": host.learner_id,
+                                            "learner_name": selected.first_name if selected else "friend",
+                                            "attempt_id": incoming.turn_id})
+                elif incoming.type == "ping":
                     await socket.send_json({"type": "pong"})
                 elif incoming.type == "dev_text" and host.dev_text:
                     outcome = host.runtime.child_turn(host.ensure_live(), incoming.text)
@@ -517,10 +575,14 @@ def child_app(host: Host) -> FastAPI:
                         continue
                     turn_id = incoming.turn_id
 
-                    async def emit_turn(done_id: str = turn_id) -> None:
-                        messages = await asyncio.to_thread(host.finish_talk, done_id)
+                    live_turn = host.ensure_live()
+                    turn_generation = host.learner_generation
+
+                    async def emit_turn(done_id: str = turn_id, live: LiveState = live_turn,
+                                        generation: int = turn_generation) -> None:
+                        messages = await asyncio.to_thread(host.finish_talk, done_id, live)
                         for message in messages:
-                            if done_id in host.cancelled_turns:
+                            if done_id in host.cancelled_turns or generation != host.learner_generation:
                                 break
                             await socket.send_json(message)
 
@@ -530,9 +592,10 @@ def child_app(host: Host) -> FastAPI:
                     for message in _ws_messages(outcome, incoming.turn_id):
                         await socket.send_json(message)
                 elif incoming.type == "home":
-                    live = host.ensure_live()
-                    live.screen = "home"
-                    live.playing_video = None
+                    if speech is not None:
+                        speech.reset(speech.attempt_id, listen=False)
+                    host.select_learner(host.learner_id)
+                    learner_generation = host.learner_generation
                     await socket.send_json({"type": "state", "name": "home", "detail": ""})
                 elif incoming.type == "unlock_gesture":
                     await socket.send_json({"type": "state", "name": "parent_unlock", "detail": ""})
@@ -584,10 +647,13 @@ def child_app(host: Host) -> FastAPI:
         finally:
             app_watcher.cancel()
             await asyncio.gather(app_watcher, return_exceptions=True)
-            host.runtime.on_app_exit = None
-            host.picture_talk = None
-            host.picture_emit = None
+            if host.runtime.on_app_exit is app_exited:
+                host.runtime.on_app_exit = None
+                host.picture_talk = None
+                host.picture_emit = None
             if speech is not None:
+                if learner_generation != host.learner_generation:
+                    speech.invalidate = lambda: None
                 await speech.close()
 
     return app
@@ -630,11 +696,22 @@ def console_app(host: Host) -> FastAPI:
         payload.set_cookie("schoolbook_session", detail, httponly=True, samesite="strict")
         return payload
 
+    def selected_id(learner_id: str = "") -> str:
+        selected = learner_id or host.learner_id
+        if host.runtime.store.learner(selected) is None:
+            raise HTTPException(404, "Unknown learner")
+        return selected
+
+    @app.get("/api/learners")
+    def learners() -> dict[str, object]:
+        return {"active_learner_id": host.learner_id, "learners": host.learner_options()}
+
     @app.get("/api/today")
-    def today() -> dict[str, object]:
-        live = host.live
-        flags = _flags(host)
-        latest = _sessions(host)
+    def today(learner_id: str = "") -> dict[str, object]:
+        learner_id = selected_id(learner_id)
+        live = host.live if host.live and host.live.learner_id == learner_id else None
+        flags = _flags(host, learner_id)
+        latest = _sessions(host, learner_id)
         minutes = 0.0
         if latest:
             started = latest[-1].started_at
@@ -660,16 +737,21 @@ def console_app(host: Host) -> FastAPI:
         }
 
     @app.get("/api/sessions")
-    def sessions() -> list[dict[str, object]]:
-        rows = _sessions(host)
+    def sessions(learner_id: str = "") -> list[dict[str, object]]:
+        learner_id = selected_id(learner_id)
+        rows = _sessions(host, learner_id)
         return [
             {"id": row.id, "started_at": row.started_at.isoformat(), "summary": row.parent_summary}
             for row in rows
         ]
 
     @app.get("/api/sessions/{session_id}")
-    def session_detail(session_id: str) -> dict[str, object]:
+    def session_detail(session_id: str, learner_id: str = "") -> dict[str, object]:
+        learner_id = selected_id(learner_id)
         with host.runtime.store.session() as db:
+            session = db.get(SessionRow, session_id)
+            if session is None or session.learner_id != learner_id:
+                raise HTTPException(404, "Session not found for this learner")
             turns = list(db.scalars(select(Turn).where(Turn.session_id == session_id)))
             calls: list[ToolCall] = []
             for turn in turns:
@@ -680,10 +762,11 @@ def console_app(host: Host) -> FastAPI:
         }
 
     @app.get("/api/progress")
-    def progress() -> dict[str, object]:
+    def progress(learner_id: str = "") -> dict[str, object]:
+        learner_id = selected_id(learner_id)
         with host.runtime.store.session() as db:
             skills = list(db.scalars(select(Skill)))
-            states = list(db.scalars(select(SkillState).where(SkillState.learner_id == host.learner_id)))
+            states = list(db.scalars(select(SkillState).where(SkillState.learner_id == learner_id)))
         by_id = {row.skill_id: row.state for row in states}
         return {
             "skills": [
@@ -693,12 +776,13 @@ def console_app(host: Host) -> FastAPI:
         }
 
     @app.get("/api/memory")
-    def memory() -> dict[str, object]:
+    def memory(learner_id: str = "") -> dict[str, object]:
+        learner_id = selected_id(learner_id)
         with host.runtime.store.session() as db:
-            notes = list(db.scalars(select(Note).where(Note.learner_id == host.learner_id)))
-            interests = list(db.scalars(select(Interest).where(Interest.learner_id == host.learner_id)))
+            notes = list(db.scalars(select(Note).where(Note.learner_id == learner_id)))
+            interests = list(db.scalars(select(Interest).where(Interest.learner_id == learner_id)))
             observations = list(
-                db.scalars(select(Observation).where(Observation.learner_id == host.learner_id))
+                db.scalars(select(Observation).where(Observation.learner_id == learner_id))
             )
         return {
             "notes": [{"id": note.id, "kind": note.kind, "text": note.text} for note in notes],
@@ -709,8 +793,9 @@ def console_app(host: Host) -> FastAPI:
         }
 
     @app.post("/api/memory/forget")
-    def forget(body: dict[str, str]) -> dict[str, bool]:
-        host.runtime.store.forget(body["kind"], host.learner_id, body["target"])
+    def forget(body: dict[str, str], learner_id: str = "") -> dict[str, bool]:
+        learner_id = selected_id(learner_id)
+        host.runtime.store.forget(body["kind"], learner_id, body["target"])
         return {"ok": True}
 
     @app.get("/api/library/videos")
@@ -792,8 +877,9 @@ def console_app(host: Host) -> FastAPI:
         return {"ok": True}
 
     @app.get("/api/learner")
-    def learner() -> dict[str, object]:
-        row = host.runtime.store.learner(host.learner_id)
+    def learner(learner_id: str = "") -> dict[str, object]:
+        learner_id = selected_id(learner_id)
+        row = host.runtime.store.learner(learner_id)
         if row is None:
             return {}
         return {
@@ -815,13 +901,15 @@ def console_app(host: Host) -> FastAPI:
         }
 
     @app.get("/api/export")
-    def export() -> dict[str, str]:
-        return {"markdown": host.runtime.store.export_markdown(host.learner_id)}
+    def export(learner_id: str = "") -> dict[str, str]:
+        learner_id = selected_id(learner_id)
+        return {"markdown": host.runtime.store.export_markdown(learner_id)}
 
     @app.post("/api/memory/notes")
-    def add_note(body: dict[str, str]) -> dict[str, str]:
+    def add_note(body: dict[str, str], learner_id: str = "") -> dict[str, str]:
+        learner_id = selected_id(learner_id)
         note_id = host.runtime.store.add_note(
-            host.learner_id, body.get("kind", "house"), body.get("text", ""), None
+            learner_id, body.get("kind", "house"), body.get("text", ""), None
         )
         return {"id": note_id}
 
@@ -877,14 +965,18 @@ def console_app(host: Host) -> FastAPI:
         return {"ok": True}
 
     @app.patch("/api/learner")
-    def update_learner(body: dict[str, object]) -> dict[str, bool]:
-        current = host.runtime.store.learner(host.learner_id)
+    def update_learner(body: dict[str, object], learner_id: str = "") -> dict[str, bool]:
+        learner_id = selected_id(learner_id)
+        current = host.runtime.store.learner(learner_id)
         if current is None:
             return {"ok": False}
+        profile_id = str(body.get("age_profile", current.age_profile))
+        if profile_id not in host.runtime.age_profiles and profile_id != host.runtime.age_profile.id:
+            raise HTTPException(400, "Unknown age profile")
         first_name = body.get("first_name", current.first_name)
         birth_year = body.get("birth_year", current.birth_year)
         host.runtime.store.upsert_learner(
-            learner_id=host.learner_id,
+            learner_id=learner_id,
             first_name=str(first_name),
             birth_year=int(str(birth_year)),
             age_profile=str(body.get("age_profile", current.age_profile)),
@@ -949,22 +1041,26 @@ def console_app(host: Host) -> FastAPI:
         return {"configured": True, "command": command}
 
     @app.post("/api/learner/delete")
-    def delete_learner() -> dict[str, bool]:
-        host.runtime.store.delete_learner_data(host.learner_id)
-        host.live = None
+    def delete_learner(learner_id: str = "") -> dict[str, bool]:
+        learner_id = selected_id(learner_id)
+        host.runtime.store.delete_learner_data(learner_id)
+        if host.live and host.live.learner_id == learner_id:
+            host.live = None
         return {"ok": True}
 
     return app
 
 
-def _flags(host: Host) -> list[Flag]:
+def _flags(host: Host, learner_id: str) -> list[Flag]:
     with host.runtime.store.session() as db:
-        return list(db.scalars(select(Flag)))
+        return list(db.scalars(select(Flag).join(SessionRow, Flag.session_id == SessionRow.id)
+                               .where(SessionRow.learner_id == learner_id)))
 
 
-def _sessions(host: Host) -> list[SessionRow]:
+def _sessions(host: Host, learner_id: str) -> list[SessionRow]:
     with host.runtime.store.session() as db:
-        return list(db.scalars(select(SessionRow)))
+        return list(db.scalars(select(SessionRow).where(SessionRow.learner_id == learner_id)
+                               .order_by(SessionRow.started_at)))
 
 
 def _outcome_payload(outcome: TurnOutcome) -> dict[str, object]:

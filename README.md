@@ -1,6 +1,6 @@
 # Schoolbook
 
-Schoolbook is a locked-down Linux learning environment for one child. The machine boots into a kiosk. The child talks with a tutor, sees a full-screen board, watches vetted videos, and can open a short list of educational apps. A parent console on a separate port shows what happened.
+Schoolbook is a locked-down Linux learning environment for children sharing a laptop. The machine boots into a kiosk. The child talks with a tutor, sees a full-screen board, watches vetted videos, and can open a short list of educational apps. A parent console on a separate port shows what happened.
 
 Version 0.11.0 adds verified albums in track order, direct GCompris activities with English voices, and video history that favors unseen videos to the software described in [docs/design-spec.md](docs/design-spec.md). Version 1.0.0 waits for a real pilot with a parent nearby. `schoolbook` starts a cage kiosk for the current session. It does not replace the machine's login manager; `packaging/install.sh` is the path that boots straight into Schoolbook.
 
@@ -45,9 +45,19 @@ uv run schoolbook --parent-password 'choose-a-parent-password'
 
 That starts the daemon and opens Chromium inside cage. Hold the top-right corner for five seconds, enter the parent password, and choose **End session** to leave. Later runs can omit `--parent-password` if the runtime under `~/.local/share/schoolbook` already exists.
 
-After the avatar tap, the microphone stays on. Speak, pause, and the tutor answers out loud. It does not show written menus. The tutor finishes a sentence before it listens again. When the child asks for a video, the tutor searches YouTube, vets a candidate, and plays it; it does not ask for a video ID. Set `OPENAI_API_KEY` in a gitignored `.env` for live speech-to-speech (OpenAI Realtime). Video search also needs `YOUTUBE_API_KEY`. Claude's consumer voice mode cannot be embedded; typed `--dev` turns can still use `ANTHROPIC_API_KEY`. On an existing desktop, Schoolbook skips cage and opens Chromium `--kiosk` directly; Super or Alt-Tab may still reach other apps. Run from a TTY for a full lock.
+After choosing a learner, the microphone stays on. Speak, pause, and the tutor answers out loud. It does not show written menus. The tutor finishes a sentence before it listens again. When the child asks for a video, the tutor searches YouTube, vets a candidate, and plays it; it does not ask for a video ID. Set `OPENAI_API_KEY` in a gitignored `.env` for live speech-to-speech (OpenAI Realtime). Video search also needs `YOUTUBE_API_KEY`. Claude's consumer voice mode cannot be embedded; typed `--dev` turns can still use `ANTHROPIC_API_KEY`. On an existing desktop, Schoolbook skips cage and opens Chromium `--kiosk` directly; Super or Alt-Tab may still reach other apps. Run from a TTY for a full lock.
 
 `schoolbookd --config` still serves only the HTTP API if you need that without cage.
+
+## Learner profiles
+
+Choose **Arum** (star) or **Hannah** (flower) on the home screen. Use **Change learner** on the main talk screen to return to that chooser. Switching closes the previous conversation, stops any media or game, and starts with the selected child’s own history. The active learner is remembered across daemon restarts; the kiosk still opens to the chooser.
+
+Hannah uses the **age-4** profile: short, concrete explanations, one idea at a time, no assumed reading or typing ability, and gentle preschool video searches aimed at ages 3–5. Videos are limited to 1–8 minutes; educational songs and animation are welcome. Pictures also use the learner’s age. These are selection preferences and metadata checks, not a guarantee of every video’s suitability. Arum keeps the existing age-six profile. Saved conversations, notes, learning progress, familiar songs, and watched-video records belong to each child separately.
+
+In the parent console, **Viewing learner** selects whose records and profile you are viewing or editing; it does not switch the child on the laptop. Content blocks, app settings, tutor name, volume, and billing remain shared. Session controls act on the child currently using the laptop and are disabled when viewing another learner.
+
+`profiles/learners.yaml` seeds additional learners once without overwriting parent edits. Hannah’s birth year is initially approximated as 2022 from her stated age; the explicit `age-4` teaching profile controls behavior, independently of birth year. Profile guidance lives in `profiles/age-4.yaml` and `profiles/age-6.yaml`.
 
 ## CF-30 kiosk controls
 
@@ -58,6 +68,8 @@ Every kiosk launch (including F11 recovery) fetches a fresh entry page so Chromi
 On the CF-30, kiosk startup also clears the Panasonic firmware mute, which is separate from the normal Linux volume controls and can remain set after changing operating systems. It is cleared once per kiosk start, so the hardware mute key still works during use.
 
 Tap the **microphone** to cancel the current speech attempt and start a fresh connection. Tap the **stop sign** to cancel the attempt and immediately silence the tutor; listening stays paused until the microphone is tapped again. A fresh connection clears the live AI conversation context, while saved learner data and transcripts remain. Connection setup and network waits do not block these controls. A disconnected browser can reconnect on the next microphone tap.
+
+If speech stops immediately because OpenAI reports exhausted API credit, the child screen explains that a grown-up must replenish the account at [OpenAI API billing](https://platform.openai.com/settings/organization/billing/). After adding credit, tap the microphone again; rebooting cannot fix an exhausted account. Speech connection failures also show a visible retry message.
 
 For each speech turn, the finalized transcription shown on screen replaces the corresponding audio message in the tutor’s conversation before a reply is requested. This gives the tutor the same words the parent sees, rather than a separate interpretation of the audio. Names, numbers, and meaningful words are preserved. Unrecognized audio is discarded; a transcription failure shows a recoverable microphone error. Spoken replies still use OpenAI Realtime audio.
 
@@ -70,6 +82,8 @@ In the CF-30's systemd-managed X11/Openbox kiosk, **F11 restarts Schoolbook**, i
 For an existing CF-30 installation, update the application and rebuild `ui/`, including `packaging/openbox/rc.xml`. Install the updated `packaging/systemd/schoolbook-kiosk.service` in `/etc/systemd/system/` and run `systemctl daemon-reload` as root; its ten-second stop timeout bounds recovery from stuck processes. The Openbox binding takes effect on the next kiosk start. Arrange that restart for a break in use; avoid restarting the kiosk while a child is using it.
 
 ## Video history and music controls
+
+Both music and video players show large **− / + volume buttons** and a slider at the top. Each button changes volume by 10 percentage points; the slider covers 0% (silent) to 100%. The setting is shared between songs and videos and saved in the kiosk browser, including across tracks and restarts. It changes media playback volume only; tutor speech and system volume are unaffected. Adjusting volume does not pause playback or enable the microphone.
 
 The child’s song screen has a large **pause/play** button. Pausing allows speech again; resuming stops microphone capture. Closing a song cancels the remaining queue.
 
@@ -101,10 +115,6 @@ The shipped manifest describes all 196 activities in Debian Trixie's GCompris 25
 Ask for “the falling letters typing game” (`gletters`) or “the train game that says a letter” (`click_on_letter`; `click_on_letter_up` uses capitals). The tutor can search activity titles and descriptions. The full suite is installed locally; the tutor launches one chosen activity directly. GCompris's Home button exits a directly launched activity. Schoolbook also supplies a red **×** at the bottom right, leaving the top-right repeat-letter speaker unobstructed. Exiting either way returns to the tutor and restores listening. F11 still restarts the kiosk if needed.
 
 Launching or exiting an activity does **not** prove the child completed it. Requiring learning activities before music/videos is not enabled; reliable activity-completion reporting and parent-configured requirements would be needed before adding that feature.
-
-If speech stops immediately because OpenAI reports exhausted API credit, the child screen explains that a grown-up must replenish the account at [OpenAI API billing](https://platform.openai.com/settings/organization/billing/). After adding credit, tap the microphone again; rebooting cannot fix an exhausted account. Speech connection failures also show a visible retry message.
-
-Both music and video players show large **− / + volume buttons** and a slider at the top. Each button changes volume by 10 percentage points; the slider covers 0% (silent) to 100%. The setting is shared between songs and videos and saved in the kiosk browser, including across tracks and restarts. It changes media playback volume only; tutor speech and system volume are unaffected. Adjusting volume does not pause playback or enable the microphone.
 
 ## License
 

@@ -85,44 +85,45 @@ def spoken_child_instructions(
     age_text: str,
     name: str,
     tutor_name: str = DEFAULT_TUTOR_NAME,
+    age_years: int = 6,
 ) -> str:
     return "\n\n".join(
         [
             core.strip(),
             age_text.strip(),
             (
-                f"The child's name is {name}. He is six and cannot read yet. "
-                f"Your name is {tutor_name}. If he calls you {tutor_name}, he means you. "
+                f"The child's name is {name}, age {age_years}. Do not assume reading ability. "
+                f"Your name is {tutor_name}. If the child calls you {tutor_name}, they mean you. "
                 "Answer to that name. "
                 "Every reply must be spoken out loud. Never show written menus, buttons, or choice lists. "
                 "Do not call ask_choice. Ask one spoken question and wait. "
                 "Pictures and videos are fine. Keep turns short and warm. "
-                "Talk the way a kind person talks to a six-year-old. "
-                "When he asks for music without naming a song, such as I want to hear some music, "
-                "call play_music to play his previously heard songs. Do not search for new music. "
-                "If the history is empty, ask which song he wants. "
+                "Follow this learner's age profile for vocabulary, pace, explanations, games, and videos. "
+                "When the child asks for music without naming a song, such as I want to hear some music, "
+                "call play_music to play the child's previously heard songs. Do not search for new music. "
+                "If the history is empty, ask which song the child wants. "
                 "For an album, call find_album with its exact title and artist, then play_album with "
                 "the returned album_id. This plays the release tracks in order. Never use search_videos, "
                 "play_video, or play_music as an album substitute. If lookup fails, say so; ask for "
                 "missing title or artist information. Do not invent tracks or claim playback before success. "
-                "When he clearly asks to hear a song, say only: Okay, I'll play [song name]. "
+                "When the child clearly asks to hear a song, say only: Okay, I'll play [song name]. "
                 "Do not say clean, radio edit, audio version, or that you are looking. "
                 "Then call search_videos with kind song, prefer a clean official audio track "
                 "if one exists, and play_video with audio_only true. Do not show the music video. "
-                "Do not talk between those tools. Play the song he asked for. Do not refuse a named song. "
-                "If he asks to play a game, or names GCompris or another computer game, that is not a song. "
-                "If he did not say what kind of game, ask what kind he wants: "
+                "Do not talk between those tools. Play the song the child asked for. Do not refuse a named song. "
+                "If the child asks to play a game, or names GCompris or another computer game, that is not a song. "
+                "If the child did not say what kind of game, ask what kind the child wants: "
                 "counting, letters, memory, colors, a maze, or music. Then wait. "
-                "If he said a kind, call list_apps, pick a GCompris activity, "
+                "If the child said a kind, call list_apps, pick a GCompris activity, "
                 "say Okay, let's play [title], and call launch_app with app_id gcompris and that activity. "
                 "Only GCompris games. Speak the choices. Do not show buttons. "
                 "Falling letters/typing is gletters; spoken letter names on a train is click_on_letter "
                 "(lowercase) or click_on_letter_up (uppercase). Always select a specific activity. "
-                "If you are not sure he wants a song, "
+                "If you are not sure the child wants a song, "
                 "ask: Did you mean you wanted to hear the song called [name]? "
-                "Then wait. Do not play music until he says yes. "
+                "Then wait. Do not play music until the child says yes. "
                 "When the child asks to watch something, treat it as a parent briefing: "
-                "you have a six-year-old who wants a video about that topic. "
+                f"you have a {age_years}-year-old who wants a video about that topic. "
                 "For general topic requests, prefer relevant videos with watch_count zero; "
                 "otherwise prefer less-watched or older videos. Search results include this history. "
                 "Use get_video_history to recall recent videos. This is a preference, not a ban: "
@@ -131,11 +132,11 @@ def spoken_child_instructions(
                 "then call search_videos, vet_video, and play_video. "
                 "Say you will put on a video about that thing. "
                 "The default for a question is to answer it verbally with words. "
-                "Every time he asks a question, carefully consider whether a picture "
+                "Every time the child asks a question, carefully consider whether a picture "
                 "or a video would be very helpful. Most questions do not need either. "
                 "Call show_picture only if a picture would be very helpful. "
-                "If he wants to see how something looks, call show_picture with kind looks. "
-                "If he needs a size comparison or a how-it-works diagram, like gears or electricity, "
+                "If the child wants to see how something looks, call show_picture with kind looks. "
+                "If the child needs a size comparison or a how-it-works diagram, like gears or electricity, "
                 "call show_picture with kind diagram. "
                 "Claude draws diagrams and chooses how to show the point. "
                 "Kind looks is a painted picture of appearance. "
@@ -163,13 +164,13 @@ def spoken_child_instructions(
                 "Then ask if they want to keep watching. "
                 "If they say yes, call video_control resume. If they say no, call video_control stop. "
                 "For a different video, search and play a new one. "
-                "If he asks a question or wants to learn something, finish the answer in this turn. "
+                "If the child asks a question or wants to learn something, finish the answer in this turn. "
                 "Default to words. Consider a picture or a suggested video only if it would be very helpful. "
                 "Do not stop after a lead-in sentence. "
-                "If he asks to talk to somebody else, or wants a boy or girl voice, "
+                "If the child asks to talk to somebody else, or wants a boy or girl voice, "
                 "say: I'm sorry, no, I can't, this is my voice. "
                 "Do not change your voice. "
-                "If he gives you a name, or asks to call you something, call set_tutor_name with that name. "
+                "If the child gives you a name, or asks to call you something, call set_tutor_name with that name. "
                 "Do not say OpenAI voice names out loud. "
                 "Never ask the child or a grown-up for a video ID. "
                 "Do not say safe, vetted, approved, or mention a video ID out loud."
@@ -338,7 +339,7 @@ def song_listen_briefing(child_text: str, *, name: str = "the child") -> str | N
         "Then call search_videos with kind song, prefer a clean official audio "
         "track if one exists, and play_video with audio_only true. "
         "Do not show the music video. Do not talk between those tools. "
-        "Play the song he asked for. Do not refuse it."
+        "Play the song the child asked for. Do not refuse it."
     )
 
 
@@ -370,7 +371,7 @@ def game_play_briefing(child_text: str, *, name: str = "the child") -> str | Non
     if kind == "any":
         return (
             f"{name} wants to play a GCompris game. "
-            "Ask out loud what kind of game he wants, like counting, letters, "
+            "Ask out loud what kind of game the child wants, like counting, letters, "
             "memory, colors, a maze, or music. Then wait. Do not launch yet."
         )
     return (
@@ -389,8 +390,8 @@ def song_confirm_briefing(child_text: str, *, name: str = "the child") -> str | 
     return (
         f"{name} might want the song {topic}, or might mean a game or something else. "
         f"Ask out loud: Did you mean you wanted to hear the song called {topic}? "
-        "Then wait. Do not search or play a song until he says yes. "
-        "If he wanted a game, do not play music."
+        "Then wait. Do not search or play a song until the child says yes. "
+        "If the child wanted a game, do not play music."
     )
 
 
@@ -403,7 +404,7 @@ def video_topic(text: str) -> str | None:
         if match:
             topic = match.group(1).strip(" .?!,")
             topic = re.sub(r"^(some|a|an|the)\s+", "", topic, flags=re.I)
-            if topic:
+            if topic and topic.lower() not in {"a", "an", "the", "some"}:
                 return topic
     return None
 
@@ -665,22 +666,31 @@ def real_world_nudge(text: str, *, name: str = "the child") -> str | None:
     return (
         f"{name} brought up something made-up or from a story. "
         "Be warm for one short beat, then gently steer toward something real: "
-        "animals, how things work, history, the sky, or something he can see. "
+        "animals, how things work, history, the sky, or something the child can see. "
         "Do not dwell on the pretend world, invent more lore, or put on a cartoon about it. "
-        "If he wants a video or picture, pick a real-world cousin of the idea."
+        "If the child wants a video or picture, pick a real-world cousin of the idea."
     )
 
 
-def video_watch_briefing(child_text: str, *, name: str = "the child") -> str | None:
+def video_watch_briefing(
+    child_text: str, *, name: str = "the child", age_years: int = 6, video_guidance: str = "",
+) -> str | None:
     topic = video_topic(child_text)
     if topic is None:
         return None
+    if age_years <= 4:
+        return (
+            f"{name} is {age_years} years old and wants a video about {topic}. "
+            "Choose a calm preschool explanation with concrete examples, not an advanced documentary. "
+            f"{video_guidance} Preserve any requested channel or creator when age-appropriate. "
+            "Search, vet, and play it. Briefly say you will put on a video about the topic."
+        )
     return (
-        f"You have a six-year-old named {name} who wants to watch a video about {topic}. "
-        f"Pick something educational that will teach him something good about the history of {topic} "
+        f"You have a {'six' if age_years == 6 else age_years}-year-old named {name} who wants to watch a video about {topic}. "
+        f"Pick something educational that will teach the child something good about the history of {topic} "
         f"or the science behind {topic}. Pick out a good educational video from YouTube and play it. "
         f"Do not pick a baby song, nursery cartoon, or Cocomelon-style show. "
-        f"When you speak to him, just say you will put on a video about {topic}. "
+        f"When you speak to the child, just say you will put on a video about {topic}. "
         "Preserve any requested channel or creator in the search query."
     )
 
@@ -942,6 +952,8 @@ REALTIME_TOOLS: list[dict[str, object]] = [
 
 @dataclass
 class RealtimeMapper:
+    age_years: int = 6
+    video_guidance: str = ""
     turn_id: str = "live"
     seq: int = 0
     child_name: str = "Arum"
@@ -1221,7 +1233,9 @@ class RealtimeMapper:
                             },
                         }
                     )
-                briefing = video_watch_briefing(cleaned, name=self.child_name) if cleaned else None
+                briefing = video_watch_briefing(
+                    cleaned, name=self.child_name, age_years=self.age_years, video_guidance=self.video_guidance,
+                ) if cleaned else None
                 if briefing:
                     outbound.append(
                         {

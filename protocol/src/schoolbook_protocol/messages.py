@@ -18,6 +18,12 @@ class Hello(BaseModel):
     token: str = Field(min_length=1)
 
 
+class SelectLearner(BaseModel):
+    type: Literal["select_learner"] = "select_learner"
+    learner_id: str = Field(min_length=1, max_length=100)
+    turn_id: str
+
+
 class AudioFrame(BaseModel):
     type: Literal["audio_frame"] = "audio_frame"
     turn_id: str
@@ -87,6 +93,7 @@ class Ping(BaseModel):
 
 ClientMessage = Annotated[
     Hello
+    | SelectLearner
     | AudioFrame
     | TalkStart
     | TalkEnd
@@ -103,10 +110,25 @@ ClientMessage = Annotated[
 ]
 
 
+class LearnerOption(BaseModel):
+    id: str
+    first_name: str
+    avatar: str = "star"
+
+
+class LearnerSelected(BaseModel):
+    type: Literal["learner_selected"] = "learner_selected"
+    learner_id: str
+    learner_name: str
+    attempt_id: str
+
+
 class HelloOk(BaseModel):
     type: Literal["hello_ok"] = "hello_ok"
     protocol_major: int
     learner_name: str
+    learner_id: str = ""
+    learners: list[LearnerOption] = Field(default_factory=list)
     talk_mode: str = "handsfree"
     voice: str = "pipeline"
 
@@ -187,6 +209,7 @@ class Pong(BaseModel):
 
 DaemonMessage = Annotated[
     HelloOk
+    | LearnerSelected
     | Transcript
     | BoardCommand
     | ChoicePrompt

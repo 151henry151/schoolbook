@@ -41,10 +41,22 @@ def build_host(config: SchoolbookConfig, secrets: Secrets) -> Host:
     store.replace_skills(load_skill_rows(config.skills_file))
     _load_images(store, config.share_dir / "images")
     _ensure_learner(store, config.etc_dir / "learner.yaml")
+    additions = config.profiles_dir / "learners.yaml"
+    if additions.is_file():
+        for raw in yaml.safe_load(additions.read_text()) or []:
+            if store.learner(str(raw["id"])) is None:
+                store.upsert_learner(learner_id=str(raw["id"]), first_name=str(raw["first_name"]),
+                                     birth_year=int(raw["birth_year"]), age_profile=str(raw["age_profile"]),
+                                     avatar=str(raw.get("avatar", "star")))
     learner_id = _first_learner_id(store)
+    selected = store.get_setting("active_learner")
+    if isinstance(selected, str) and store.learner(selected) is not None:
+        learner_id = selected
     apps = {key: app for key, app in load_manifests(config.apps_dir).items()
             if executable(app.exec[0]) is not None}
     profile = load_age_profile(config.profiles_dir / "age-6.yaml")
+    profiles = {p.id: p for path in config.profiles_dir.glob("age-*.yaml")
+                for p in [load_age_profile(path)]}
     token = secrets_mod.token_urlsafe(32)
     config.data_dir.mkdir(parents=True, exist_ok=True)
     config.images_dir.mkdir(parents=True, exist_ok=True)
@@ -61,6 +73,7 @@ def build_host(config: SchoolbookConfig, secrets: Secrets) -> Host:
         output_check=OutputCheck.load(config.output_check_file),
         apps=apps,
         age_profile=profile,
+        age_profiles=profiles,
         core_prompt=config.core_prompt.read_text(encoding="utf-8"),
         model=config.model if config.providers.llm == "anthropic" else "fake",
         summary=_llm(config, secrets),
@@ -116,6 +129,8 @@ def _ensure_learner(store: Store, path: Path) -> None:
     if not path.is_file():
         return
     raw = yaml.safe_load(path.read_text(encoding="utf-8"))
+    if store.learner(str(raw["id"])) is not None:
+        return
     store.upsert_learner(
         learner_id=str(raw["id"]),
         first_name=str(raw["first_name"]),

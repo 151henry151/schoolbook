@@ -372,3 +372,85 @@ def test_exiting_native_game_notifies_child_without_pressing_schoolbook_close(tm
         running[0] = False
         assert socket.receive_json() == {'type': 'app', 'action': 'stop'}
         assert host.live.screen == 'home'
+
+
+def _add_hannah(host: Host) -> None:
+    from schoolbookd.tutor.prompts import load_age_profile
+
+    host.runtime.store.upsert_learner(learner_id="hannah", first_name="Hannah", birth_year=2022,
+                                      age_profile="age-4", avatar="flower")
+    host.runtime.age_profiles["age-4"] = load_age_profile(Path("profiles/age-4.yaml"))
+
+
+def test_child_switch_ends_old_session_and_starts_separate_history(tmp_path: Path) -> None:
+    host = _host(tmp_path)
+    _add_hannah(host)
+    old = host.ensure_live()
+    old.playing_video = "old-video"
+    old.song_queue = ["old-song"]
+    host.note_transcript("child", "Arum's private question")
+    host.begin_talk("unfinished")
+    with TestClient(child_app(host)).websocket_connect("/ws") as ws:
+        ws.send_json({"type": "hello", "protocol_major": 1, "token": host.token})
+        hello = ws.receive_json()
+        assert {row["id"] for row in hello["learners"]} == {"kid", "hannah"}
+        ws.send_json({"type": "select_learner", "learner_id": "missing", "turn_id": "bad"})
+        assert ws.receive_json()["type"] == "error"
+        assert host.live is old
+        ws.send_json({"type": "select_learner", "learner_id": "hannah", "turn_id": "new"})
+        assert ws.receive_json() == {"type": "learner_selected", "learner_id": "hannah",
+                                     "learner_name": "Hannah", "attempt_id": "new"}
+        assert host.runtime.store.get_setting("active_learner") == "hannah"
+        assert host.runtime.store.open_session("kid") is None
+        assert host.live is None
+        assert not old.song_queue and old.playing_video is None
+        assert not host.buffers and "unfinished" in host.cancelled_turns
+        host.note_transcript("child", "Hannah likes cats")
+        assert host.ensure_live().session_id != old.session_id
+        assert host.ensure_live().learner_id == "hannah"
+        ws.send_json({"type": "home"})
+        assert ws.receive_json()["name"] == "home"
+        assert host.live is None
+
+
+def test_realtime_uses_selected_age_and_invalidates_old_tools(tmp_path: Path) -> None:
+    import asyncio
+
+    host = _host(tmp_path)
+    _add_hannah(host)
+
+    async def check() -> None:
+        previous = host.make_realtime()
+        host.select_learner("hannah")
+        talk = host.make_realtime()
+        assert "Hannah, age 4" in talk.instructions
+        assert "preschool" in talk.instructions.lower()
+        assert talk.mapper.age_years == 4
+        assert "ages 3" in str(next(t for t in talk.tools if t["name"] == "search_videos"))
+        assert previous.execute("list_apps", {}) == {"cancelled": True}
+        assert host.runtime.age_profile.age_years == 6
+
+    asyncio.run(check())
+
+
+def test_console_views_are_scoped_without_switching_child(tmp_path: Path) -> None:
+    host = _host(tmp_path)
+    _add_hannah(host)
+    old = host.ensure_live()
+    host.note_transcript("child", "Only Arum said this")
+    hannah_session = host.runtime.store.start_session("hannah", "fake")
+    host.runtime.store.add_turn(hannah_session, "child", "Hannah's question")
+    client = TestClient(console_app(host))
+    assert client.post("/api/login", json={"password": "parent-secret"}).status_code == 200
+    assert client.get("/api/learners").json()["active_learner_id"] == "kid"
+    assert [row["id"] for row in client.get("/api/sessions?learner_id=hannah").json()] == [hannah_session]
+    assert client.get(f"/api/sessions/{old.session_id}?learner_id=hannah").status_code == 404
+    assert client.get(f"/api/sessions/{hannah_session}?learner_id=hannah").json()["turns"][0]["text"] == "Hannah's question"
+    assert client.get("/api/today?learner_id=hannah").json()["in_session"] is False
+    assert client.post("/api/memory/notes?learner_id=hannah", json={"text": "Likes flowers"}).status_code == 200
+    assert client.get("/api/memory?learner_id=kid").json()["notes"] == []
+    assert client.get("/api/memory?learner_id=hannah").json()["notes"][0]["text"] == "Likes flowers"
+    assert client.patch("/api/learner?learner_id=hannah", json={"first_name": "Hannah H"}).status_code == 200
+    assert client.get("/api/learner?learner_id=kid").json()["first_name"] == "Sam"
+    assert client.get("/api/learner?learner_id=missing").status_code == 404
+    assert host.learner_id == "kid" and host.live is old

@@ -16,10 +16,10 @@ TINY_PNG = bytes.fromhex(
 )
 
 
-def picture_prompt(brief: str) -> str:
+def picture_prompt(brief: str, age_years: int = 6) -> str:
     return (
         "Draw one clear educational illustration as a complete SVG "
-        "for a curious six-year-old. "
+        f"for a curious {age_years}-year-old child. "
         "The tutor's point to illustrate is: "
         f"{brief} "
         "Choose the best way to show that point: how it works, "
@@ -32,21 +32,21 @@ def picture_prompt(brief: str) -> str:
         "Make the idea obvious, not an artistic scene. "
         "Do not paint a realistic picture of how a creature looks. "
         "No text, letters, logos, or watermark. "
-        "Not a baby cartoon or nursery drawing. "
+        "Use simple, gentle shapes and details suited to the learner’s age. "
         "Return only the SVG."
     )
 
 
-def looks_prompt(brief: str) -> str:
+def looks_prompt(brief: str, age_years: int = 6) -> str:
     return (
-        "A single kid-friendly picture for a curious six-year-old. "
+        f"A single kid-friendly picture for a curious {age_years}-year-old child. "
         "Show how this looks, as a clear painting, not a diagram. "
         f"{brief} "
         "If this is a legend or a story creature, draw how people imagine it, "
         "not a photograph of a real animal. "
         "Warm and gentle, not scary or gory. "
         "No text, letters, logos, or watermark. "
-        "Not a baby cartoon or nursery drawing."
+        "Use simple, gentle shapes and details suited to the learner’s age."
     )
 
 

@@ -19,11 +19,17 @@ import { VideoOverlay } from "./video";
 
 type Phase = "home" | "talk";
 
+type Learner = { id: string; first_name: string; avatar: string };
+
 type Choice = { id: string; label: string };
 
 export function App() {
   const [phase, setPhase] = useState<Phase>("home");
   const phaseRef = useRef<Phase>("home");
+  const [learners, setLearners] = useState<Learner[]>([]);
+  const selectedLearner = useRef("");
+  const pendingLearner = useRef("");
+  const [selecting, setSelecting] = useState(false);
   const [name, setName] = useState("friend");
   const [talk, setTalk] = useState<TalkPair>({ child: "", tutor: "" });
   const [spokenIndex, setSpokenIndex] = useState(-1);
@@ -115,6 +121,8 @@ export function App() {
           type: string;
           message?: string;
           learner_name?: string;
+          learner_id?: string;
+          learners?: Learner[];
           text?: string;
           role?: string;
           turn_id?: string;
@@ -137,7 +145,19 @@ export function App() {
         };
         if (message.attempt_id && message.attempt_id !== attemptId.current) return;
         const receivedAttempt = attemptId.current;
+        if (message.type === "learner_selected" && message.learner_id === pendingLearner.current) {
+          pendingLearner.current = "";
+          setSelecting(false);
+          selectedLearner.current = message.learner_id || "";
+          setName(message.learner_name || "friend");
+          clearLearnerScreen();
+          phaseRef.current = "talk";
+          setPhase("talk");
+          resetListen();
+          return;
+        }
         if (message.type === "error") {
+          setSelecting(false);
           queue.current.interrupt();
           speaking.current = false;
           freshListen.current = true;
@@ -149,6 +169,7 @@ export function App() {
         if (message.type === "hello_ok") {
           if (message.learner_name) setName(message.learner_name);
           if (message.voice) setVoice(message.voice);
+          if (message.learners) setLearners(message.learners);
         }
         if (message.type === "transcript" && message.text) {
           if (message.role === "child" && message.partial) return;
@@ -279,7 +300,14 @@ export function App() {
         setSocket(ws);
         socketRef.current = ws;
         if (phaseRef.current === "talk" && !listenPausedRef.current) {
-          ws.send(JSON.stringify({ type: "talk_start", turn_id: attemptId.current }));
+          if (selectedLearner.current) {
+            pendingLearner.current = selectedLearner.current;
+            listenPausedRef.current = true;
+            setListenPaused(true);
+            ws.send(JSON.stringify({ type: "select_learner", learner_id: selectedLearner.current, turn_id: attemptId.current }));
+          } else {
+            ws.send(JSON.stringify({ type: "talk_start", turn_id: attemptId.current }));
+          }
         }
       };
       ws.onclose = ws.onerror = () => {
@@ -287,6 +315,7 @@ export function App() {
         queue.current.interrupt();
         speaking.current = false;
         freshListen.current = true;
+        setSelecting(false);
         setStatus("connection-error");
       };
     })();
@@ -437,37 +466,68 @@ export function App() {
     }
   }
 
+  function clearLearnerScreen() {
+    setTalk({ child: "", tutor: "" });
+    talkRef.current = { child: "", tutor: "" };
+    setElements([]); setChoices([]); setDraft("");
+    setVideoId(""); setVideoPaused(false); setVideoAudioOnly(false);
+    setPictureId(""); setPictureLoading(false); setAppId("");
+    appIdRef.current = ""; mediaPlaying.current = false;
+    pendingVideo.current = ""; pendingPicture.current = "";
+  }
+
+  function chooseLearner(learnerId: string) {
+    try {
+      const context = capture.current ?? createCaptureContext();
+      void context.resume();
+      capture.current = context;
+    } catch { capture.current = null; }
+    if (!learnerId) { resetListen(); setPhase("talk"); return; }
+    if (socketRef.current?.readyState !== WebSocket.OPEN) {
+      setSpeechError("Connecting. Try your name again in a moment.");
+      setConnectionEpoch((n) => n + 1);
+      return;
+    }
+    pauseListen();
+    setSelecting(true);
+    pendingLearner.current = learnerId;
+    socketRef.current.send(JSON.stringify({ type: "select_learner", learner_id: learnerId, turn_id: attemptId.current }));
+  }
+
+  function changeLearner() {
+    pauseListen();
+    send({ type: "home" });
+    clearLearnerScreen();
+    selectedLearner.current = "";
+    pendingLearner.current = "";
+    phaseRef.current = "home";
+    setPhase("home");
+  }
+
   if (phase === "home") {
     return (
       <main className="home">
         <BatteryIndicator />
         <WifiButton token={token} />
-        <button
-          type="button"
-          className="avatar"
-          onClick={() => {
-            try {
-              const context = createCaptureContext();
-              void context.resume();
-              capture.current = context;
-              vad.current = createVad();
-              hands.current = armed();
-            } catch {
-              capture.current = null;
-            }
-            resetListen();
-            setPhase("talk");
-          }}
-        >
-          {name}
-        </button>
-        <p>I am a computer helper.</p>
+        <h1>Who is learning?</h1>
+        <div className="learner-choices">
+          {(learners.length ? learners : [{ id: "", first_name: name, avatar: "star" }]).map((learner) => (
+            <button key={learner.id} type="button" className="avatar" disabled={selecting}
+              aria-label={learner.first_name} onClick={() => chooseLearner(learner.id)}>
+              <span aria-hidden="true">{learner.avatar === "flower" ? "✿" : "★"}</span>
+              {learner.first_name}
+            </button>
+          ))}
+        </div>
+        <p>{selecting ? "Getting ready…" : "I am a computer helper."}</p>
+        {speechError ? <p role="alert">{speechError}</p> : null}
       </main>
     );
   }
 
   return (
     <main className="talk">
+      {!videoId && !appId ? <button className="change-learner" onClick={changeLearner}>Change learner</button> : null}
       {!videoId && !appId ? <BatteryIndicator /> : null}
       {!videoId && !appId ? <WifiButton token={token} onOpen={pauseListen} /> : null}
       <button

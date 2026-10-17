@@ -1,4 +1,5 @@
 id: age-6
+age_years: 6
 max_sentences_per_turn: 3
 max_words_per_sentence: 12
 target_reading_grade: 1

@@ -42,7 +42,7 @@ class ClaudePictures:
                 "model": self._model,
                 "max_tokens": 8000,
                 "system": (
-                    "You draw educational SVG illustrations for a six-year-old. "
+                    "You draw educational SVG illustrations for a child of the age specified in the request. "
                     "The user message is the point to show. "
                     "Choose the best picture to make that point clear. "
                     "Use your judgment. "

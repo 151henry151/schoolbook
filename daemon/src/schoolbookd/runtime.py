@@ -60,6 +60,7 @@ class Runtime:
     apps: dict[str, AppManifest]
     age_profile: AgeProfile
     core_prompt: str
+    age_profiles: dict[str, AgeProfile] = field(default_factory=dict)
     model: str = "fake"
     summary: LLMProvider | None = None
     catalog: VideoCatalog | None = None
@@ -75,6 +76,13 @@ class Runtime:
     overlay: Callable[[Callable[[], None]], Callable[[], None]] | None = None
     on_app_exit: Callable[[], None] | None = None
     _hide_overlay: Callable[[], None] | None = field(default=None, init=False, repr=False)
+
+    def profile_for(self, learner_id: str) -> AgeProfile:
+        learner = self.store.learner(learner_id)
+        return self.age_profiles.get(learner.age_profile, self.age_profile) if learner else self.age_profile
+
+    def catalog_for(self, live: LiveState) -> VideoCatalog | None:
+        return self.catalog.for_profile(self.profile_for(live.learner_id)) if self.catalog else None
 
     def image_path(self, image_id: str) -> Path | None:
         if not image_id or "/" in image_id or ".." in image_id:
@@ -105,7 +113,7 @@ class Runtime:
         self.images_dir.mkdir(parents=True, exist_ok=True)
         path = self.image_path(image_id)
         if path is None:
-            path = self._save_picture(image_id, maker.generate(self._picture_prompt(kind, topic)))
+            path = self._save_picture(image_id, maker.generate(self._picture_prompt(kind, topic, live.learner_id)))
         self.store.add_image(image_id, str(path), topic, "generated", "generated")
         live.screen = "board"
         return {"shown": True, "image_id": image_id}
@@ -115,10 +123,10 @@ class Runtime:
             return self.scenes or self.pictures
         return self.pictures or self.scenes
 
-    def _picture_prompt(self, kind: str, brief: str) -> str:
+    def _picture_prompt(self, kind: str, brief: str, learner_id: str) -> str:
         if kind == "looks":
-            return looks_prompt(brief)
-        return picture_prompt(brief)
+            return looks_prompt(brief, self.profile_for(learner_id).age_years)
+        return picture_prompt(brief, self.profile_for(learner_id).age_years)
 
     def _save_picture(self, image_id: str, data: bytes) -> Path:
         assert self.images_dir is not None
@@ -157,7 +165,7 @@ class Runtime:
         )
         system = assemble_prompt(
             self.core_prompt,
-            self._age_text(),
+            self._age_text(live.learner_id),
             assemble_profile(learner),
             state,
         )
@@ -167,8 +175,8 @@ class Runtime:
             execute=lambda name, args: self._execute(live, name, args),
             output_check=self.output_check,
             model=self.model,
-            max_sentences=self.age_profile.max_sentences_per_turn,
-            max_words=self.age_profile.max_words_per_sentence,
+            max_sentences=self.profile_for(live.learner_id).max_sentences_per_turn,
+            max_words=self.profile_for(live.learner_id).max_words_per_sentence,
         )
         try:
             outcome = loop.run_turn(
@@ -288,6 +296,7 @@ class Runtime:
                         "activity": activity.id,
                         "title": activity.title,
                         "description": activity.description,
+                        "suggested_ages": ", ".join(str(age) for age in activity.ages),
                     }
                 )
         return games
@@ -316,10 +325,10 @@ class Runtime:
             parent_summary, tutor_notes = split_summary(response.text or fallback)
         self.store.end_session(live.session_id, reason, parent_summary, tutor_notes)
 
-    def _age_text(self) -> str:
+    def _age_text(self, learner_id: str) -> str:
         from schoolbookd.tutor.prompts import render_age_profile
 
-        return render_age_profile(self.age_profile)
+        return render_age_profile(self.profile_for(learner_id))
 
     def run_tool(
         self,
@@ -352,7 +361,8 @@ class Runtime:
                 return {"error": "pictures are not ready"}
             topic = str(args.get("topic") or args.get("brief") or "").strip()
             brief = str(args.get("brief") or topic).strip()
-            image_id = picture_id(topic, brief)
+            age = self.profile_for(live.learner_id).age_years
+            image_id = picture_id(topic, brief if age == 6 else f"age {age}: {brief}")
             self.images_dir.mkdir(parents=True, exist_ok=True)
             path = self.image_path(image_id)
             if path is None and defer_pictures:
@@ -364,7 +374,7 @@ class Runtime:
                     "kind": kind,
                 }
             if path is None:
-                path = self._save_picture(image_id, maker.generate(self._picture_prompt(kind, brief)))
+                path = self._save_picture(image_id, maker.generate(self._picture_prompt(kind, brief, live.learner_id)))
             self.store.add_image(image_id, str(path), topic, "generated", "generated")
             live.screen = "board"
             return {"shown": True, "image_id": image_id}
@@ -468,6 +478,9 @@ class Runtime:
                 live.song_queue = remaining
             return result
         if name == "play_video":
+            catalog = self.catalog_for(live)
+            if not args.get("audio_only") and catalog and not catalog.playable(str(args["video_id"])):
+                return {"error": "Choose a video that fits this learner's age profile and duration window."}
             live.song_queue.clear()
             live.song_recorded = False
             live.video_recorded = False
@@ -504,7 +517,9 @@ class Runtime:
             if self.catalog is None:
                 return {"candidates": []}
             kind = str(args.get("kind") or "video")
-            candidates = self.catalog.search(str(args["query"]), kind=kind)
+            catalog = self.catalog_for(live)
+            assert catalog is not None
+            candidates = catalog.search(str(args["query"]), kind=kind)
             if kind == "video":
                 history = {row["video_id"]: row for row in self.store.video_history(
                     live.learner_id, video_ids=[str(v["video_id"]) for v in candidates],
@@ -531,7 +546,9 @@ class Runtime:
         if name == "vet_video":
             if self.catalog is None:
                 return {"verdict": "unknown"}
-            return self.catalog.vet(str(args["video_id"]))
+            catalog = self.catalog_for(live)
+            assert catalog is not None
+            return catalog.vet(str(args["video_id"]))
         return {"error": "not implemented"}
 
     def song_started(self, live: LiveState, video_id: str) -> None:

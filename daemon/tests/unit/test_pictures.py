@@ -266,3 +266,9 @@ def test_claude_draws_an_svg_diagram_from_the_brief() -> None:
     assert "svg" in body
     assert "shark" in body or "house" in body
     assert "judgment" in body or "choose" in body or "illustrat" in body
+
+
+def test_picture_prompts_use_the_current_learner_age() -> None:
+    assert "4-year-old child" in picture_prompt("flower", age_years=4)
+    assert "4-year-old child" in looks_prompt("flower", age_years=4)
+    assert "six-year-old" not in picture_prompt("flower", age_years=4)

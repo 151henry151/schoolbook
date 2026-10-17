@@ -22,6 +22,9 @@ type Today = {
 };
 
 export function App() {
+  const [learners, setLearners] = useState<{ id: string; first_name: string }[]>([]);
+  const [learnerId, setLearnerId] = useState("");
+  const [activeLearnerId, setActiveLearnerId] = useState("");
   const [authed, setAuthed] = useState(false);
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
@@ -54,7 +57,7 @@ export function App() {
     finally { setBusy(false); }
   }
 
-  async function openScreen(next: Screen, restore = false) {
+  async function openScreen(next: Screen, restore = false, selected = learnerId) {
     const current = ++revision.current;
     setScreen(next);
     setBody(null);
@@ -66,7 +69,13 @@ export function App() {
       Session: "api/today", Learner: "api/learner", Settings: "api/settings",
     };
     try {
-      const data = await request(path[next]);
+      const roster = await request("api/learners") as { active_learner_id: string; learners: { id: string; first_name: string }[] };
+      const viewing = selected || roster.active_learner_id;
+      const data = await request(scoped(path[next], viewing));
+      if (current !== revision.current) return;
+      setLearners(roster.learners || []);
+      setActiveLearnerId(roster.active_learner_id);
+      setLearnerId(viewing);
       if (current !== revision.current) return;
       setAuthed(true);
       setBody(data);
@@ -75,12 +84,16 @@ export function App() {
     } finally { if (current === revision.current) setBusy(false); }
   }
 
+  function scoped(path: string, selected = learnerId) {
+    return selected ? `${path}?learner_id=${encodeURIComponent(selected)}` : path;
+  }
+
   async function save(path: string, init: RequestInit = { method: "POST" }) {
     setBusy(true);
     setError("");
     setNotice("");
     try {
-      await request(path, init);
+      await request(scoped(path), init);
       if (path.endsWith("/relock")) { setAuthed(false); setBody(null); return; }
       setNotice("Saved.");
       await openScreen(screen);
@@ -114,6 +127,10 @@ export function App() {
   return (
     <>
       <header className="brand"><div><strong>Schoolbook</strong><span>Parent console</span></div>
+        <label>Viewing learner <select aria-label="Viewing learner" value={learnerId} disabled={busy}
+          onChange={(event) => { setNotice(""); void openScreen(screen, false, event.target.value); }}>
+          {learners.map((learner) => <option key={learner.id} value={learner.id}>{learner.first_name}</option>)}
+        </select></label>
         <button disabled={busy} onClick={() => post("api/session/relock")}>Lock console</button>
       </header>
       <div className="layout"><nav aria-label="Parent console">
@@ -130,18 +147,18 @@ export function App() {
         {busy ? <p role="status">Connecting…</p> : null}
         <fieldset disabled={busy} className="content">
         {screen === "Today" ? <TodayView data={body as Today | null} onResolve={(id) => void post(`/api/flags/${id}/resolve`)} /> : null}
-        {screen === "Sessions" ? <SessionsView data={body} /> : null}
+        {screen === "Sessions" ? <SessionsView key={learnerId} data={body} learnerId={learnerId} /> : null}
         {screen === "Progress" ? <ProgressView data={body} /> : null}
         {screen === "Memory" ? <MemoryView data={body} onForget={(kind, target) => { if (window.confirm("Forget this saved note?")) void save("api/memory/forget", jsonBody({ kind, target })); }} /> : null}
         {screen === "Library" ? <LibraryView data={body} onBlock={(id) => void post(`/api/library/videos/${id}/block`)} /> : null}
         {screen === "Apps" ? <AppsView data={body} onDisable={(id) => void post(`/api/apps/${id}/disable`)} /> : null}
         {screen === "Session" ? (
           <section>
-            <h2>End the child’s session</h2><p>This closes Schoolbook on the laptop. Use this when your child is finished.</p><button type="button" onClick={() => { if (window.confirm("End the child’s session and close Schoolbook?")) post("api/session/end"); }}>End session</button>
+            <h2>End the child’s session</h2><p>Currently using the laptop: {learners.find((learner) => learner.id === activeLearnerId)?.first_name || "child"}.</p><p>This closes Schoolbook on the laptop. Use this when your child is finished.</p><button type="button" disabled={Boolean(learnerId && learnerId !== activeLearnerId)} onClick={() => { if (window.confirm("End the child’s session and close Schoolbook?")) post("api/session/end"); }}>End session</button>
             <button type="button" onClick={() => void post("/api/session/relock")}>Lock</button>
           </section>
         ) : null}
-        {screen === "Learner" && body ? <LearnerView data={body} onSave={save} /> : null}
+        {screen === "Learner" && body ? <LearnerView key={learnerId} data={body} onSave={save} /> : null}
         {screen === "Settings" && body ? <SettingsView data={body} onSave={save} /> : null}
         </fieldset>
       </main></div>
@@ -167,14 +184,14 @@ function TodayView({ data, onResolve }: { data: Today | null; onResolve: (id: st
   );
 }
 
-function SessionsView({ data }: { data: unknown }) {
+function SessionsView({ data, learnerId }: { data: unknown; learnerId: string }) {
   const [detail, setDetail] = useState<{ turns: { role: string; text: string }[] } | null>(null);
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
   const rows = Array.isArray(data) ? [...data].reverse() : [];
   async function inspect(id: string) {
     setLoading(true); setError("");
-    try { setDetail(await request(`api/sessions/${encodeURIComponent(id)}`) as typeof detail); }
+    try { setDetail(await request(`api/sessions/${encodeURIComponent(id)}?learner_id=${encodeURIComponent(learnerId)}`) as typeof detail); }
     catch (err) { setError(err instanceof Error ? err.message : "Cannot load this session."); }
     finally { setLoading(false); }
   }

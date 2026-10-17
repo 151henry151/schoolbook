@@ -138,6 +138,21 @@ def educational_search_query(query: str) -> str:
     return f"{' '.join(words[:6])} documentary"
 
 
+def preschool_search_query(query: str) -> str:
+    return " ".join(query.split()[:8]) + " preschool educational ages 3 4 5"
+
+
+def rank_for_preschool(videos: list[VideoCandidate]) -> list[VideoCandidate]:
+    markers = ("preschool", "kindergarten", "scishow kids", "pbs kids", "sesame",
+               "letters", "counting", "shapes", "phonics")
+
+    def score(video: VideoCandidate) -> int:
+        text = f"{video.title} {video.channel_title} {video.description}".lower()
+        return sum(3 for marker in markers if marker in text) + int(video.made_for_kids)
+
+    return sorted(videos, key=score, reverse=True)
+
+
 def is_baby_content(video: VideoCandidate) -> bool:
     text = f"{video.title} {video.channel_title} {video.description}".lower()
     return any(marker in text for marker in _BABY_MARKERS)
@@ -165,6 +180,7 @@ def hard_filter(
     duration_minutes: tuple[int, int] = (1, 30),
     language: str = "en",
     kind: str = "video",
+    preschool: bool = False,
 ) -> HardFilterResult:
     if video.video_id in rejected_ids:
         return HardFilterResult(False, "already rejected")
@@ -180,7 +196,7 @@ def hard_filter(
         return HardFilterResult(False, "age restricted")
     if video.short:
         return HardFilterResult(False, "short")
-    if is_baby_content(video):
+    if not preschool and is_baby_content(video):
         return HardFilterResult(False, "baby entertainment")
     low, high = duration_minutes
     if video.duration_s < low * 60 or video.duration_s > high * 60:
@@ -198,6 +214,7 @@ def visible_to_tutor(
     duration_minutes: tuple[int, int] = (1, 30),
     language: str = "en",
     kind: str = "video",
+    preschool: bool = False,
 ) -> list[VideoCandidate]:
     kept: list[VideoCandidate] = []
     for video in videos:
@@ -208,6 +225,7 @@ def visible_to_tutor(
             duration_minutes=duration_minutes,
             language=language,
             kind=kind,
+            preschool=preschool,
         )
         if result.ok:
             kept.append(video)
@@ -274,6 +292,7 @@ def vet_video(
     duration_minutes: tuple[int, int] = (1, 30),
     language: str = "en",
     kind: str = "video",
+    preschool: bool = False,
 ) -> Verdict:
     hard = hard_filter(
         video,
@@ -282,6 +301,7 @@ def vet_video(
         duration_minutes=duration_minutes,
         language=language,
         kind=kind,
+        preschool=preschool,
     )
     if hard.ok and kind == "song":
         return Verdict("approved", "requested song audio", 1, "song")

@@ -759,3 +759,31 @@ test("speech failure explains exhausted credit and a new attempt clears the mess
   }) } as MessageEvent));
   expect(screen.queryByRole("alert")).toBeNull();
 });
+
+test("selecting Hannah waits for confirmation and changing learner clears the old conversation", async () => {
+  render(<App />);
+  await vi.waitFor(() => expect(sockets.length).toBe(1));
+  const ws = sockets[0];
+  const receive = (message: object) => act(() => ws.onmessage?.({ data: JSON.stringify(message) } as MessageEvent));
+  const messages = () => ws.send.mock.calls.map(([raw]) => JSON.parse(String(raw)));
+  receive({ type: "hello_ok", learner_name: "Arum", learner_id: "arum", learners: [
+    {id: "arum", first_name: "Arum", avatar: "star"}, {id: "hannah", first_name: "Hannah", avatar: "flower"},
+  ] });
+  fireEvent.click(screen.getByRole("button", {name: "Hannah"}));
+  expect(startMic).not.toHaveBeenCalled();
+  const selection = messages().find(m => m.type === "select_learner");
+  expect(selection.learner_id).toBe("hannah");
+  receive({type: "learner_selected", learner_id: "hannah", learner_name: "Hannah", attempt_id: selection.turn_id});
+  await vi.waitFor(() => expect(startMic).toHaveBeenCalled());
+  const firstAttempt = messages().filter(m => m.type === "talk_start").at(-1).turn_id;
+  receive({type: "transcript", role: "child", text: "Hannah asks about flowers", attempt_id: firstAttempt});
+  expect(screen.getByText("Hannah asks about flowers")).toBeTruthy();
+  fireEvent.click(screen.getByRole("button", {name: "Change learner"}));
+  expect(messages().at(-1).type).toBe("home");
+  expect(screen.queryByText("Hannah asks about flowers")).toBeNull();
+  fireEvent.click(screen.getByRole("button", {name: "Arum"}));
+  const next = messages().filter(m => m.type === "select_learner").at(-1);
+  receive({type: "learner_selected", learner_id: "arum", learner_name: "Arum", attempt_id: next.turn_id});
+  receive({type: "transcript", role: "child", text: "Late Hannah speech", attempt_id: firstAttempt});
+  expect(screen.queryByText("Late Hannah speech")).toBeNull();
+});

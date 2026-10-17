@@ -178,8 +178,9 @@ def test_empty_youtube_hits_are_not_cached(tmp_path: Path) -> None:
 
 def test_empty_search_falls_back_to_an_approved_video(tmp_path: Path) -> None:
     store = _store(tmp_path)
-    from schoolbookd.db.models import Video
     from datetime import UTC, datetime
+
+    from schoolbookd.db.models import Video
 
     store.save_video(
         Video(
@@ -207,3 +208,29 @@ def test_embed_uses_the_nocookie_domain() -> None:
     assert "rel=0" in url
     assert "controls=0" in url
     assert "autoplay=1" in url
+
+
+def test_preschool_search_and_approval_follow_current_profile(tmp_path: Path) -> None:
+    from schoolbookd.tutor.prompts import AgeProfile, load_age_profile
+
+    client = ScriptSearch([
+        _video(video_id="long-video", title="Volcano documentary", duration_s=1200),
+        _video(video_id="short-video", title="Volcano facts for preschool", duration_s=180),
+        _video(video_id="nursery-song", title="Volcano nursery rhyme", duration_s=120),
+    ])
+    catalog = VideoCatalog(_store(tmp_path), client, CharterReviewer(), CharterReviewer())
+    older = catalog.for_profile(AgeProfile(id="age-6"))
+    younger = catalog.for_profile(load_age_profile(Path("profiles/age-4.yaml")))
+    assert "long-video" in [v["video_id"] for v in older.search("volcano")]
+    assert older.vet("long-video")["verdict"] == "approved"
+    assert [v["video_id"] for v in younger.search("volcano")] == ["short-video", "nursery-song"]
+    assert "preschool" in client.queries[-1]
+    assert "10-12" not in client.queries[-1]
+    assert client.calls == 2  # Different age searches cannot share ranked result caches.
+    assert younger.vet("long-video")["verdict"] == "rejected"
+    assert not younger.playable("long-video")
+    assert older.vet("long-video")["verdict"] == "approved"  # Age limits aren't global rejections.
+    assert younger.vet("nursery-song")["verdict"] == "approved"
+    assert older.vet("nursery-song")["verdict"] == "rejected"
+    client.videos = []
+    assert "long-video" not in [v["video_id"] for v in younger.search("volcano rocks")]

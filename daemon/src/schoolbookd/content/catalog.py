@@ -19,7 +19,10 @@ from schoolbookd.content.vetting import (
     Review,
     VideoCandidate,
     educational_search_query,
+    hard_filter,
+    preschool_search_query,
     rank_for_clean_audio,
+    rank_for_preschool,
     rank_for_stretch,
     song_search_query,
     update_reputation,
@@ -28,6 +31,7 @@ from schoolbookd.content.vetting import (
 )
 from schoolbookd.db.models import Video
 from schoolbookd.db.store import Store
+from schoolbookd.tutor.prompts import AgeProfile
 
 
 class SearchClient(Protocol):
@@ -43,7 +47,7 @@ class CharterReviewer:
 
     def review(self, video: VideoCandidate) -> Review:
         text = f"{video.title} {video.description} {video.channel_title}".lower()
-        for word in ("surprise", "buy now", "violent", "clickbait", "cocomelon", "nursery rhyme"):
+        for word in ("surprise", "buy now", "violent", "clickbait"):
             if word in text:
                 return Review(False, word, 1)
         return Review(True, "fits the learner", 4)
@@ -132,6 +136,7 @@ class VideoCatalog:
         duration_minutes: tuple[int, int] = (1, 30),
         language: str = "en",
         albums: AlbumResolver | None = None,
+        preschool: bool = False,
     ) -> None:
         self.store = store
         self.youtube = youtube
@@ -140,6 +145,26 @@ class VideoCatalog:
         self.duration_minutes = duration_minutes
         self.language = language
         self.albums = albums
+        self.preschool = preschool
+
+    def for_profile(self, profile: AgeProfile) -> VideoCatalog:
+        window = (profile.video_duration_minutes[0], profile.video_duration_minutes[1])
+        return VideoCatalog(self.store, self.youtube, self.metadata, self.frames,
+                            duration_minutes=window, language=profile.language,
+                            albums=self.albums, preschool=profile.age_years <= 4)
+
+    def playable(self, video_id: str) -> bool:
+        row = self.store.video(video_id)
+        return bool(row and self._filter([candidate_from_row(row)]))
+
+    def _filter(self, videos: list[VideoCandidate], *, kind: str = "video") -> list[VideoCandidate]:
+        return visible_to_tutor(videos, blocked_channels=self.store.blocked_channels(),
+                                rejected_ids=self.store.rejected_ids(), duration_minutes=self.duration_minutes,
+                                language=self.language, kind=kind,
+                                preschool=self.preschool)
+
+    def _rank(self, videos: list[VideoCandidate]) -> list[VideoCandidate]:
+        return rank_for_preschool(videos) if self.preschool else rank_for_stretch(videos)
 
     def find_album(self, title: str, artist: str) -> dict[str, object]:
         if self.albums is None:
@@ -170,8 +195,10 @@ class VideoCatalog:
 
     def search(self, query: str, *, kind: str = "video") -> list[dict[str, object]]:
         song = kind == "song"
-        shaped = song_search_query(query) if song else educational_search_query(query)
-        key = ("yt-song-v1:" if song else "yt-cache-v2:") + shaped.strip().lower()
+        shape_video = preschool_search_query if self.preschool else educational_search_query
+        shaped = song_search_query(query) if song else shape_video(query)
+        prefix = "yt-song-v1:" if song else "yt-preschool-v1:" if self.preschool else "yt-cache-v2:"
+        key = prefix + shaped.strip().lower()
         cached_ids = self.store.get_setting(key)
         candidates = self._load_cached(cached_ids)
         if candidates is None:
@@ -181,15 +208,8 @@ class VideoCatalog:
                 candidates = []
             if candidates:
                 self._remember(key, candidates)
-        visible = visible_to_tutor(
-            candidates,
-            blocked_channels=self.store.blocked_channels(),
-            rejected_ids=self.store.rejected_ids(),
-            duration_minutes=self.duration_minutes,
-            language=self.language,
-            kind="song" if song else "video",
-        )
-        kept = rank_for_clean_audio(visible) if song else rank_for_stretch(visible)
+        visible = self._filter(candidates, kind="song" if song else "video")
+        kept = rank_for_clean_audio(visible) if song else self._rank(visible)
         if song:
             self._approve_requested_songs(kept)
         elif not kept:
@@ -226,6 +246,13 @@ class VideoCatalog:
 
     def vet(self, video_id: str) -> dict[str, object]:
         existing = self.store.video(video_id)
+        candidate = self._lookup(video_id) or (candidate_from_row(existing) if existing else None)
+        if candidate is not None:
+            hard = hard_filter(candidate, blocked_channels=self.store.blocked_channels(),
+                               rejected_ids=set(), duration_minutes=self.duration_minutes,
+                               language=self.language, preschool=self.preschool)
+            if not hard.ok:
+                return {"verdict": "rejected", "reasons": hard.reason, "level": None, "stage": "hard"}
         if existing is not None and existing.verdict in {"approved", "rejected", "blocked"}:
             return {
                 "verdict": existing.verdict,
@@ -244,6 +271,7 @@ class VideoCatalog:
             rejected_ids=self.store.rejected_ids(),
             duration_minutes=self.duration_minutes,
             language=self.language,
+            preschool=self.preschool,
         )
         self.store.save_video(
             Video(
@@ -296,7 +324,7 @@ class VideoCatalog:
             text = f"{video.title} {video.summary}".lower()
             if any(word in text for word in words):
                 matches.append(self._lookup(video.id) or candidate_from_row(video))
-        return rank_for_stretch(matches)
+        return self._rank(self._filter(matches))
 
     def _load_cached(self, cached_ids: object) -> list[VideoCandidate] | None:
         if not isinstance(cached_ids, list) or not cached_ids:

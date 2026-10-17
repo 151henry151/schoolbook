@@ -4,7 +4,8 @@ export class ApiError extends Error {
   constructor(public status: number, message: string) { super(message); }
 }
 export function apiUrl(path: string, page = window.location.href): string {
-  return new URL(path.replace(/^\/+/, ""), new URL("./", page)).pathname;
+  const url = new URL(path.replace(/^\/+/, ""), new URL("./", page));
+  return url.pathname + url.search;
 }
 export async function request(path: string, init?: RequestInit): Promise<unknown> {
   let response: Response;

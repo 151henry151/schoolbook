@@ -49,3 +49,7 @@ li button { margin: .5rem 0 0 .5rem; }
   .metrics { grid-template-columns: 1fr; }
   .metrics article { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: .5rem; }
 }
+
+.brand { flex-wrap: wrap; }
+.brand label { display: flex; align-items: center; gap: .6rem; flex-wrap: wrap; }
+.brand select { padding: .4rem .6rem; background: white; color: #213b35; }

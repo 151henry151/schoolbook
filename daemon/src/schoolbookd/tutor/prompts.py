@@ -16,12 +16,17 @@ from schoolbookd.providers.base import SystemBlock
 class AgeProfile(BaseModel):
     model_config = ConfigDict(extra="forbid")
     id: str
+    age_years: int = Field(default=6, ge=2, le=18)
+    teaching_guidance: str = "Use short, warm explanations and concrete examples; assume no reading ability."
+    video_guidance: str = (
+        "Prefer educational documentaries and explainers aimed at ages 10-12; avoid baby entertainment."
+    )
     max_sentences_per_turn: int = 3
     max_words_per_sentence: int = 12
     target_reading_grade: int = 1
     talk_mode_default: str = "handsfree"
     break_suggestions: str = "gentle"
-    video_duration_minutes: list[int] = Field(default_factory=lambda: [1, 30])
+    video_duration_minutes: list[int] = Field(default_factory=lambda: [1, 30], min_length=2, max_length=2)
     video_stretch_steps: int = 1
     watch_along_pause_min_seconds: int = 120
     observer_frame_interval_s: float = 3
@@ -39,6 +44,11 @@ def render_age_profile(profile: AgeProfile) -> str:
     return "\n".join(
         [
             f"Age profile {profile.id}.",
+            f"The learner is {profile.age_years} years old.",
+            profile.teaching_guidance,
+            f"Video guidance: {profile.video_guidance}",
+            f"Video length: {profile.video_duration_minutes[0]} to "
+            f"{profile.video_duration_minutes[-1]} minutes.",
             f"At most {profile.max_sentences_per_turn} sentences.",
             f"Each sentence under about {profile.max_words_per_sentence} words.",
             "One question at a time, then wait.",

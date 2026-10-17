@@ -5,6 +5,7 @@ import { apiUrl, request } from "./api";
 afterEach(() => vi.unstubAllGlobals());
 test("API calls stay under the console prefix", () => {
   expect(apiUrl("/api/today", "https://romptele.com/schoolbook/")).toBe("/schoolbook/api/today");
+  expect(apiUrl("api/memory?learner_id=hannah", "https://romptele.com/schoolbook/")).toBe("/schoolbook/api/memory?learner_id=hannah");
   expect(apiUrl("api/login", "http://localhost:8766/")).toBe("/api/login");
 });
 test("offline laptop and expired login are distinct failures", async () => {

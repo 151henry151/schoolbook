@@ -7,13 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Add Hannah, age four, with a child-friendly learner chooser, preschool teaching and video guidance, age-aware pictures, separate learning/media history, and a learner selector in the parent console. Switching cancels the previous conversation and preserves existing learner records.
+- Give the child large volume buttons and a slider during songs and videos, remembering the level across tracks and kiosk restarts without interrupting playback.
+
 ### Fixed
 
 - Explain exhausted speech-service credit on screen instead of silently losing listening; preserve microphone retry after credit is replenished.
-
-### Added
-
-- Give the child large volume buttons and a slider during songs and videos, remembering the level across tracks and kiosk restarts without interrupting playback.
 
 ## [0.11.0] - 2026-10-16
 

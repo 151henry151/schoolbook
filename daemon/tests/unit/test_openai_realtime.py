@@ -1268,3 +1268,12 @@ def test_described_letter_activities_are_games_not_songs():
         assert song_topic(text) is None
         assert 'list_apps' in game_play_briefing(text)
     assert song_topic('Play the song Falling Letters') == 'Falling Letters'
+
+
+def test_preschool_video_briefing_follows_hannah_age() -> None:
+    briefing = video_watch_briefing("show me a video about snakes", name="Hannah", age_years=4)
+    assert briefing is not None
+    assert "4 years old" in briefing and "Hannah" in briefing
+    assert "snakes" in briefing
+    assert "preschool" in briefing
+    assert "six-year-old" not in briefing and "10-12" not in briefing

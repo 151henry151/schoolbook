@@ -93,6 +93,10 @@ class Store:
         with self.session() as db:
             return db.get(Learner, learner_id)
 
+    def learners(self) -> list[Learner]:
+        with self.session() as db:
+            return list(db.scalars(select(Learner).order_by(Learner.first_name, Learner.id)))
+
     def replace_skills(self, skills: list[Skill]) -> None:
         with self.session() as db:
             for skill in skills:

@@ -84,3 +84,24 @@ def test_realtime_voice_requires_an_openai_key(tmp_path: Path) -> None:
         Secrets(parent_password_hash="x", console_session_secret="y"),
     )
     assert any("OPENAI_API_KEY" in item for item in errors)
+
+
+def test_bootstrap_seeds_hannah_once_and_preserves_parent_edits(tmp_path: Path) -> None:
+    from schoolbookd.bootstrap import build_host
+
+    config = load_config(_write_tree(tmp_path))
+    (config.etc_dir / "learner.yaml").write_text("id: arum\nfirst_name: Arum\nbirth_year: 2020\n")
+    (config.profiles_dir / "age-4.yaml").write_text("id: age-4\nage_years: 4\n")
+    (config.profiles_dir / "learners.yaml").write_text(
+        "- id: hannah\n  first_name: Hannah\n  birth_year: 2022\n  age_profile: age-4\n")
+    (config.apps_dir / "gcompris.yaml").write_text("id: gcompris\nname: GCompris\nexec: [gcompris-qt]\n")
+    host = build_host(config, Secrets())
+    assert host.learner_id == "arum"
+    host.runtime.store.upsert_learner(learner_id="hannah", first_name="Hannah H", birth_year=2021,
+                                     age_profile="age-4")
+    host.runtime.store.put_setting("active_learner", "hannah")
+    rebuilt = build_host(config, Secrets())
+    assert rebuilt.learner_id == "hannah"
+    assert rebuilt.runtime.store.learner("hannah").first_name == "Hannah H"
+    assert len(rebuilt.runtime.store.learners()) == 2
+    assert rebuilt.runtime.profile_for("hannah").age_years == 4
