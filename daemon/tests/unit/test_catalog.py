@@ -168,12 +168,12 @@ def test_red_team_queries_approve_nothing(tmp_path: Path) -> None:
     assert approved == []
 
 
-def test_empty_youtube_hits_are_not_cached(tmp_path: Path) -> None:
+def test_exhausted_search_is_cached_to_avoid_repeated_api_spend(tmp_path: Path) -> None:
     client = ScriptSearch([])
     catalog = VideoCatalog(_store(tmp_path), client, CharterReviewer(), CharterReviewer())
     assert catalog.search("dinosaur") == []
     assert catalog.search("dinosaur") == []
-    assert client.calls == 2
+    assert client.calls == 1
 
 
 def test_empty_search_falls_back_to_an_approved_video(tmp_path: Path) -> None:
@@ -234,3 +234,69 @@ def test_preschool_search_and_approval_follow_current_profile(tmp_path: Path) ->
     assert older.vet("nursery-song")["verdict"] == "rejected"
     client.videos = []
     assert "long-video" not in [v["video_id"] for v in younger.search("volcano rocks")]
+
+
+class PagedSearch(ScriptSearch):
+    def __init__(self, pages):
+        super().__init__([])
+        self.pages = pages
+        self.tokens = []
+
+    def search_page(self, query, *, music=False, page_token=''):
+        self.tokens.append(page_token)
+        return self.pages[page_token]
+
+
+def test_exhausted_cached_candidates_advance_pages_and_persist_progress(tmp_path: Path):
+    store = _store(tmp_path)
+    client = PagedSearch({
+        '': ([_video()], 'second'),
+        'second': ([_video(video_id='freshvideo1')], 'third'),
+        'third': ([_video(video_id='freshvideo2')], ''),
+    })
+    catalog = VideoCatalog(store, client, CharterReviewer(), CharterReviewer())
+    assert catalog.search('volcano')[0]['video_id'] == 'abcdefghijk'
+    assert client.tokens == ['']
+    assert catalog.search('volcano', exclude_ids={'abcdefghijk'})[0]['video_id'] == 'freshvideo1'
+    assert client.tokens == ['', 'second']
+    reopened = Store(session_factory(make_engine(tmp_path / 'schoolbook.db')))
+    catalog = VideoCatalog(reopened, client, CharterReviewer(), CharterReviewer())
+    assert catalog.search('volcano', exclude_ids={'abcdefghijk', 'freshvideo1'})[0][
+        'video_id'] == 'freshvideo2'
+    assert client.tokens == ['', 'second', 'third']
+    assert catalog.search('volcano', exclude_ids={'abcdefghijk', 'freshvideo1', 'freshvideo2'}) == []
+    assert client.tokens == ['', 'second', 'third']  # Don't refetch exhausted results all day.
+    assert catalog.search('volcano')[0]['video_id'] == 'abcdefghijk'  # Other child's cache isn't filtered.
+    from sqlalchemy import select
+
+    from schoolbookd.db.models import Setting
+    with reopened.session() as db:
+        cursor_key = next(row.key for row in db.scalars(select(Setting)) if row.key.endswith(':page'))
+    reopened.put_setting(cursor_key, {'next': '', 'fetched_at': 0})
+    client.pages[''] = ([_video(video_id='freshvideo3')], '')
+    assert catalog.search('volcano', exclude_ids={'abcdefghijk', 'freshvideo1', 'freshvideo2'})[0][
+        'video_id'] == 'freshvideo3'  # Expired search discovers newly indexed videos.
+
+
+def test_search_continues_past_unsafe_pages_but_never_returns_seen_fallbacks(tmp_path: Path):
+    store = _store(tmp_path)
+    client = PagedSearch({
+        '': ([_video(age_restricted=True)], 'second'),
+        'second': ([_video(video_id='freshvideo1')], ''),
+    })
+    catalog = VideoCatalog(store, client, CharterReviewer(), CharterReviewer())
+    assert catalog.search('volcano')[0]['video_id'] == 'freshvideo1'
+    assert client.tokens == ['', 'second']
+    catalog.vet('freshvideo1')
+    assert catalog.search('volcano', exclude_ids={'freshvideo1'}) == []
+
+
+def test_legacy_cache_gets_a_fresh_search_when_its_unseen_pool_is_empty(tmp_path: Path):
+    from schoolbookd.content.vetting import educational_search_query
+    store = _store(tmp_path)
+    client = PagedSearch({'': ([_video(video_id='freshvideo1')], '')})
+    catalog = VideoCatalog(store, client, CharterReviewer(), CharterReviewer())
+    key = 'yt-cache-v2:' + educational_search_query('volcano').strip().lower()
+    catalog._remember(key, [_video()])
+    assert catalog.search('volcano', exclude_ids={'abcdefghijk'})[0]['video_id'] == 'freshvideo1'
+    assert client.tokens == ['']

@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- Exclude each child's previously watched videos from general searches and block accidental repeats at playback. Specifically requested videos remain available; ambiguous repeat requests require clarification.
+- Search additional YouTube pages when cached unseen choices run out, retain search progress across restarts, and refresh exhausted searches after a day instead of repeatedly returning the same small set.
+
 ## [0.13.0] - 2026-10-16
 
 ### Changed

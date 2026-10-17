@@ -16,16 +16,24 @@ class YouTubeClient:
         self._client = client or httpx.Client(base_url="https://www.googleapis.com", timeout=20)
 
     def search(self, query: str, **kwargs: object) -> list[VideoCandidate]:
-        params: dict[str, object] = {
+        videos, _ = self.search_page(query, music=bool(kwargs.get("music")))
+        return videos
+
+    def search_page(
+        self, query: str, *, music: bool = False, page_token: str = "",
+    ) -> tuple[list[VideoCandidate], str]:
+        params: dict[str, str | int] = {
             "part": "snippet",
             "type": "video",
             "safeSearch": "strict",
             "videoEmbeddable": "true",
             "q": query,
             "key": self._api_key,
-            "maxResults": 8,
+            "maxResults": 8 if music else 25,
         }
-        if kwargs.get("music"):
+        if page_token:
+            params["pageToken"] = page_token
+        if music:
             params["videoCategoryId"] = "10"
         else:
             params["videoDuration"] = "medium"
@@ -34,14 +42,13 @@ class YouTubeClient:
             params=params,
         )
         response.raise_for_status()
+        data = response.json()
         ids = [
             item["id"]["videoId"]
-            for item in response.json().get("items", [])
+            for item in data.get("items", [])
             if item.get("id", {}).get("videoId")
         ]
-        if not ids:
-            return []
-        return self.videos(ids)
+        return (self.videos(ids) if ids else []), str(data.get("nextPageToken") or "")
 
     def videos(self, ids: list[str]) -> list[VideoCandidate]:
         found: list[VideoCandidate] = []

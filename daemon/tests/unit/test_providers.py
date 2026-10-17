@@ -123,3 +123,16 @@ def test_album_metadata_batches_ids_and_reads_age_rating_from_content_details():
     assert [len(batch) for batch in batches] == [50, 11]
     assert len(found) == 61
     assert all(v.age_restricted for v in found)
+
+
+def test_youtube_search_page_passes_cursor_and_returns_next_token():
+    seen = []
+    def handler(request):
+        seen.append(request.url.params)
+        return httpx.Response(200, json={'items': [], 'nextPageToken': 'next-page'})
+    client = YouTubeClient('key', httpx.Client(base_url='https://www.googleapis.com',
+                                             transport=httpx.MockTransport(handler)))
+    assert client.search_page('horses', page_token='second-page') == ([], 'next-page')
+    assert seen[0]['pageToken'] == 'second-page'
+    assert seen[0]['maxResults'] == '25'
+    assert seen[0]['safeSearch'] == 'strict'

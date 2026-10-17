@@ -12,7 +12,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 from schoolbookd.content.apps import AppManifest, build_argv
-from schoolbookd.content.catalog import VideoCatalog
+from schoolbookd.content.catalog import VideoCatalog, candidate_from_row, public_candidate
 from schoolbookd.content.pictures import (
     PictureMaker,
     looks_prompt,
@@ -21,6 +21,7 @@ from schoolbookd.content.pictures import (
     picture_suffix,
 )
 from schoolbookd.content.playback import pause_allowed, split_summary
+from schoolbookd.content.replays import specific_video_request
 from schoolbookd.db.models import ImageRow, Video
 from schoolbookd.db.store import Store
 from schoolbookd.learner.memory import assemble_profile
@@ -40,6 +41,7 @@ class LiveState:
     history: list[dict[str, object]] = field(default_factory=list)
     observations: list[str] = field(default_factory=list)
     playing_video: str | None = None
+    last_video_id: str | None = None
     playing_audio_only: bool = False
     song_recorded: bool = False
     video_recorded: bool = False
@@ -49,6 +51,8 @@ class LiveState:
     screen: str = "home"
     last_video_pause_at: float | None = None
     now_s: float = 0.0
+    child_request: str = ""
+    tutor_question: str = ""
 
 
 @dataclass
@@ -153,6 +157,7 @@ class Runtime:
     def child_turn(self, live: LiveState, text: str) -> TurnOutcome:
         if live.paused:
             return TurnOutcome(["The session is paused."], [], False, "", False, False)
+        live.child_request = text
         learner = self.store.profile_input(live.learner_id)
         elapsed = "session in progress"
         state = "\n".join(
@@ -190,6 +195,7 @@ class Runtime:
             return TurnOutcome(["The tutor is resting."], [], False, "", False, False)
         child_turn = self.store.add_turn(live.session_id, "child", text)
         tutor_text = " ".join(outcome.sentences)
+        live.tutor_question = tutor_text
         tutor_turn = self.store.add_turn(live.session_id, "tutor", tutor_text)
         for record in outcome.tool_calls:
             self.store.add_tool_call(
@@ -479,6 +485,11 @@ class Runtime:
             return result
         if name == "play_video":
             catalog = self.catalog_for(live)
+            video_id = str(args["video_id"])
+            if (not args.get("audio_only") and video_id in self.store.watched_video_ids(live.learner_id)
+                    and not self._requested_replay(live, video_id, args.get("replay_request"))):
+                return {"error": "This child already watched that video. Search for an unseen video. "
+                        "Replay only a specifically requested video, quoting the child's current request."}
             if not args.get("audio_only") and catalog and not catalog.playable(str(args["video_id"])):
                 return {"error": "Choose a video that fits this learner's age profile and duration window."}
             live.song_queue.clear()
@@ -486,6 +497,9 @@ class Runtime:
             live.video_recorded = False
             live.playing_audio_only = bool(args.get("audio_only"))
             live.playing_video = str(args["video_id"])
+            if not live.playing_audio_only:
+                live.last_video_id = live.playing_video
+            live.child_request = ""  # A requested replay authorizes one playback, not future turns.
             live.screen = "video"
             video = self.store.video(live.playing_video)
             if video is not None:
@@ -519,7 +533,17 @@ class Runtime:
             kind = str(args.get("kind") or "video")
             catalog = self.catalog_for(live)
             assert catalog is not None
-            candidates = catalog.search(str(args["query"]), kind=kind)
+            requested_id = str(args.get("requested_video_id") or "")
+            if requested_id and kind == "video":
+                if not self._requested_replay(live, requested_id, args.get("replay_request")):
+                    return {"candidates": [], "error": "A specific replay needs the child's current request. "
+                            "Use get_video_history to identify the video; clarify ambiguous requests."}
+                row = self.store.video(requested_id)
+                candidates = ([public_candidate(candidate_from_row(row))]
+                              if row and catalog.playable(requested_id) else [])
+            else:
+                excluded = self.store.watched_video_ids(live.learner_id) if kind == "video" else set()
+                candidates = catalog.search(str(args["query"]), kind=kind, exclude_ids=excluded)
             if kind == "video":
                 history = {row["video_id"]: row for row in self.store.video_history(
                     live.learner_id, video_ids=[str(v["video_id"]) for v in candidates],
@@ -528,12 +552,13 @@ class Runtime:
                 candidates = [{**v, "watch_count": history.get(v["video_id"], {}).get("watch_count", 0),
                                "last_watched_at": history.get(v["video_id"], {}).get("last_watched_at")}
                               for v in candidates]
-                # A preference, never an exclusion: all relevant candidates remain selectable.
-                candidates.sort(key=lambda v: (int(str(v["watch_count"])),
-                                               str(v["last_watched_at"] or "")))
+            if not candidates and kind == "video":
+                return {"candidates": [], "message": "No suitable unseen video found in this search. "
+                        "Try a different relevant query or explain that none was found. Do not replay "
+                        "a watched video unless the child specifically requests it."}
             return {"candidates": candidates}
         if name == "get_video_history":
-            return {"videos": self.store.video_history(live.learner_id),
+            return {"videos": self.store.video_history(live.learner_id, query=str(args.get("query") or "")),
                     "definition": "Watched at least 50% of the video; songs are separate."}
         if name == "set_tutor_name":
             from schoolbookd.providers.openai_realtime import normalize_tutor_name
@@ -550,6 +575,17 @@ class Runtime:
             assert catalog is not None
             return catalog.vet(str(args["video_id"]))
         return {"error": "not implemented"}
+
+    def _requested_replay(self, live: LiveState, video_id: str, quote: object) -> bool:
+        if not isinstance(quote, str):
+            return False
+        history = self.store.video_history(live.learner_id, video_ids=[video_id], limit=1)
+        if not history:
+            return False
+        recent = self.store.video_history(live.learner_id, limit=1)
+        last_video_id = live.last_video_id or recent[0]["video_id"]
+        return specific_video_request(quote, live.child_request, str(history[0]["title"]),
+                                      latest=last_video_id == video_id, tutor_question=live.tutor_question)
 
     def song_started(self, live: LiveState, video_id: str) -> None:
         if live.playing_audio_only and live.playing_video == video_id and not live.song_recorded:

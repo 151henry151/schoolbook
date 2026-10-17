@@ -127,10 +127,13 @@ def spoken_child_instructions(
                 "Then wait. Do not play music until the child says yes. "
                 "When the child asks to watch something, treat it as a parent briefing: "
                 f"you have a {age_years}-year-old who wants a video about that topic. "
-                "For general topic requests, prefer relevant videos with watch_count zero; "
-                "otherwise prefer less-watched or older videos. Search results include this history. "
-                "Use get_video_history to recall recent videos. This is a preference, not a ban: "
-                "replay a specific video when requested, and prioritize a good topic match. "
+                "For general topic requests, show only videos this child has not watched. "
+                "Never replay one just because it matches the topic or there are no new results. "
+                "Use get_video_history to identify a specifically requested repeat. "
+                "Pass that one requested_video_id to search_videos and quote the child's entire current "
+                "request in replay_request for both search_videos and play_video. "
+                "A topic or channel name alone is not a request to repeat a specific video. "
+                "If the requested repeat is ambiguous, ask the child which video before playing. "
                 "Pick something educational that teaches history or science of the topic, "
                 "then call search_videos, vet_video, and play_video. "
                 "Say you will put on a video about that thing. "
@@ -807,8 +810,8 @@ def session_update(
 REALTIME_TOOLS: list[dict[str, object]] = [
     {"type": "function", "name": "get_video_history",
      "description": "Read this child's recently watched videos (at least 50% played). "
-                    "Prefer unseen videos for general topics; honor requests to replay a specific video.",
-     "parameters": {"type": "object", "properties": {}}},
+                    "Use a title-fragment query to find older videos for a specific replay request.",
+     "parameters": {"type": "object", "properties": {"query": {"type": "string"}}}},
     {
         "type": "function",
         "name": "show_board",
@@ -835,6 +838,10 @@ REALTIME_TOOLS: list[dict[str, object]] = [
                 "query": {"type": "string"},
                 "subject": {"type": "string"},
                 "kind": {"type": "string", "enum": ["video", "song"]},
+                "requested_video_id": {"type": "string", "description":
+                    "Only for a specifically requested repeat: one video_id from get_video_history."},
+                "replay_request": {"type": "string", "description":
+                    "The child's entire current request, quoted exactly, only for that specific video."},
             },
             "required": ["query"],
         },
@@ -878,13 +885,16 @@ REALTIME_TOOLS: list[dict[str, object]] = [
         "name": "play_video",
         "description": (
             "Play a video_id that just passed vet_video. Search and vet first; never ask for an ID. "
-            "Set audio_only true for a song so the music video stays hidden."
+            "Watched videos are blocked unless the child specifically requested that video. "
+            "For that exception supply replay_request with the child's entire current request verbatim. "
+            "Set audio_only true only for a song, never to bypass watched-video filtering."
         ),
         "parameters": {
             "type": "object",
             "properties": {
                 "video_id": {"type": "string"},
                 "audio_only": {"type": "boolean"},
+                "replay_request": {"type": "string"},
             },
             "required": ["video_id"],
         },

@@ -111,9 +111,16 @@ class ToolPolicy:
         kind = args.get("kind", "video")
         if kind not in {"video", "song"}:
             return Decision(False, "kind must be video or song")
+        for key in ("requested_video_id", "replay_request"):
+            value = args.get(key, "")
+            if not isinstance(value, str) or len(value) > 1000:
+                return Decision(False, f"{key} must be short text")
         return Decision(True, "ok")
 
     def _check_get_video_history(self, args: dict[str, object], ctx: PolicyContext) -> Decision:
+        query = args.get("query", "")
+        if not isinstance(query, str) or len(query) > 120:
+            return Decision(False, "query must be a short title fragment")
         return Decision(True, "ok")
 
     def _check_play_music(self, args: dict[str, object], ctx: PolicyContext) -> Decision:
@@ -142,6 +149,9 @@ class ToolPolicy:
         audio_only = args.get("audio_only", False)
         if audio_only not in {True, False}:
             return Decision(False, "audio_only must be true or false")
+        quote = args.get("replay_request", "")
+        if not isinstance(quote, str) or len(quote) > 1000:
+            return Decision(False, "replay_request must quote the child's current request")
         return Decision(True, "ok")
 
     def _check_vet_video(self, args: dict[str, object], ctx: PolicyContext) -> Decision:

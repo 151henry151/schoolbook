@@ -477,6 +477,7 @@ class Store:
 
     def video_history(
         self, learner_id: str, *, video_ids: list[str] | None = None, limit: int = 30,
+        query: str = "",
     ) -> list[dict[str, object]]:
         from sqlalchemy import func
 
@@ -489,10 +490,19 @@ class Store:
                     .order_by(func.max(VideoWatch.watched_at).desc()))
             if video_ids is not None:
                 stmt = stmt.where(Video.id.in_(video_ids))
+            if query.strip():
+                stmt = stmt.where(Video.title.icontains(query.strip(), autoescape=True))
             rows = db.execute(stmt.limit(limit))
             return [{"video_id": video_id, "title": title, "watch_count": count,
                      "last_watched_at": stamp.replace(tzinfo=UTC).isoformat()}
                     for video_id, title, count, stamp in rows]
+
+    def watched_video_ids(self, learner_id: str) -> set[str]:
+        """All watched IDs, not just the recent-history page shown to the tutor."""
+        with self.session() as db:
+            return set(db.scalars(select(VideoWatch.video_id).where(
+                VideoWatch.learner_id == learner_id,
+            ).distinct()))
 
     def familiar_songs(self, learner_id: str) -> list[str]:
         from sqlalchemy import func

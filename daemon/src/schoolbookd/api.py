@@ -312,6 +312,10 @@ class Host:
         if not text.strip():
             return
         live = self.ensure_live()
+        if role == "child":
+            live.child_request = text
+        elif role == "tutor":
+            live.tutor_question = text
         self.runtime.store.add_turn(live.session_id, role, text)
 
 

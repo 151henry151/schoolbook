@@ -193,28 +193,54 @@ class VideoCatalog:
             return []
         return [str(track["video_id"]) for track in album["tracks"]]
 
-    def search(self, query: str, *, kind: str = "video") -> list[dict[str, object]]:
+    def search(
+        self, query: str, *, kind: str = "video", exclude_ids: set[str] | None = None,
+    ) -> list[dict[str, object]]:
         song = kind == "song"
         shape_video = preschool_search_query if self.preschool else educational_search_query
         shaped = song_search_query(query) if song else shape_video(query)
         prefix = "yt-song-v1:" if song else "yt-preschool-v1:" if self.preschool else "yt-cache-v2:"
         key = prefix + shaped.strip().lower()
         cached_ids = self.store.get_setting(key)
-        candidates = self._load_cached(cached_ids)
-        if candidates is None:
-            if self.youtube is not None:
-                candidates = self.youtube.search(shaped, music=song)
+        candidates = self._load_cached(cached_ids) or []
+        excluded = set() if song else (exclude_ids or set())
+
+        def available() -> list[VideoCandidate]:
+            visible = self._filter([v for v in candidates if v.video_id not in excluded], kind=kind)
+            return rank_for_clean_audio(visible) if song else self._rank(visible)
+
+        kept = available()
+        cursor_key = key + ":page"
+        cursor = self.store.get_setting(cursor_key)
+        # Fetch further pages only after the reusable, age-appropriate pool runs out.
+        # Persist the cursor across restarts and refresh an exhausted search at most daily.
+        for _ in range(1 if song else 3):
+            if kept or self.youtube is None:
+                break
+            token = ""
+            if not song and isinstance(cursor, dict):
+                token = str(cursor.get("next") or "")
+                fetched_at = float(cursor.get("fetched_at", 0))
+                if not token and datetime.now(UTC).timestamp() - fetched_at < 86400:
+                    break
+            search_page = getattr(self.youtube, "search_page", None)
+            if callable(search_page):
+                found, next_token = search_page(shaped, music=song, page_token=token)
             else:
-                candidates = []
-            if candidates:
-                self._remember(key, candidates)
-        visible = self._filter(candidates, kind="song" if song else "video")
-        kept = rank_for_clean_audio(visible) if song else self._rank(visible)
+                found, next_token = self.youtube.search(shaped, music=song), ""
+            candidates = list({v.video_id: v for v in [*candidates, *found]}.values())
+            self._remember(key, candidates)
+            cursor = {"next": next_token, "fetched_at": datetime.now(UTC).timestamp()}
+            if not song:
+                self.store.put_setting(cursor_key, cursor, actor="system")
+            kept = available()
+            if not next_token or next_token == token:
+                break
         if song:
             self._approve_requested_songs(kept)
         elif not kept:
-            kept = self._approved_matching(query)
-        return [public_candidate(video) for video in kept]
+            kept = [v for v in self._approved_matching(query) if v.video_id not in excluded]
+        return [public_candidate(video) for video in kept[:8]]
 
     def _approve_requested_songs(self, videos: list[VideoCandidate]) -> None:
         for video in videos:
