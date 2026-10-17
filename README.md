@@ -2,7 +2,7 @@
 
 Schoolbook is a locked-down Linux learning environment for children sharing a laptop. The machine boots into a kiosk. The child talks with a tutor, sees a full-screen board, watches vetted videos, and can open a short list of educational apps. A parent console on a separate port shows what happened.
 
-Version 0.13.0 adds automatic idle-listening pause, repetitive-transcription protection, speech usage counters, and updated learner avatars to the software described in [docs/design-spec.md](docs/design-spec.md). Version 1.0.0 waits for a real pilot with a parent nearby. `schoolbook` starts a cage kiosk for the current session. It does not replace the machine's login manager; `packaging/install.sh` is the path that boots straight into Schoolbook.
+Version 0.14.0 prevents unrequested video repeats, expands searches when unseen choices run out, and hides idle video controls in the software described in [docs/design-spec.md](docs/design-spec.md). Version 1.0.0 waits for a real pilot with a parent nearby. `schoolbook` starts a cage kiosk for the current session. It does not replace the machine's login manager; `packaging/install.sh` is the path that boots straight into Schoolbook.
 
 ## Layout
 

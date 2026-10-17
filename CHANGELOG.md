@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.14.0] - 2026-10-17
+
 ### Changed
 
 - Exclude each child's previously watched videos from general searches and block accidental repeats at playback. Specifically requested videos remain available; ambiguous repeat requests require clarification.
