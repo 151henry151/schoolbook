@@ -8,6 +8,7 @@ from __future__ import annotations
 import array
 import asyncio
 import json
+import logging
 import re
 import sys
 import time
@@ -15,6 +16,7 @@ from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from typing import Any
 
+TRANSCRIPTION_MODEL = "gpt-4o-mini-transcribe"
 REALTIME_MODEL = "gpt-realtime-2.1"
 REALTIME_URL = f"wss://api.openai.com/v1/realtime?model={REALTIME_MODEL}"
 
@@ -778,7 +780,7 @@ def session_update(
                         "prefix_padding_ms": 400,
                         "threshold": 0.3,
                     },
-                    "transcription": {"model": "gpt-4o-mini-transcribe"},
+                    "transcription": {"model": TRANSCRIPTION_MODEL},
                 },
                 "output": {
                     "format": {"type": "audio/pcm", "rate": OUTPUT_RATE},
@@ -1502,6 +1504,26 @@ class RealtimeTalk:
     _pending_response: dict[str, object] | None = None
     _emit: Emit | None = None
     input_paused: bool = False
+    on_usage: Callable[[str, str, str, object], None] | None = None
+
+    def record_usage(self, event: dict[str, object]) -> None:
+        if self.on_usage is None:
+            return
+        kind = event.get("type")
+        payload = event.get("response") if kind == "response.done" else event
+        if not isinstance(payload, dict) or "usage" not in payload:
+            return
+        if kind == "response.done":
+            category, model, identifier = "realtime", REALTIME_MODEL, payload.get("id")
+        elif kind == "conversation.item.input_audio_transcription.completed":
+            category, model, identifier = "transcription", TRANSCRIPTION_MODEL, event.get("item_id")
+        else:
+            return
+        if isinstance(identifier, str):
+            try:
+                self.on_usage(category, identifier, model, payload["usage"])
+            except Exception:
+                logging.getLogger(__name__).warning("Could not record speech usage counters")
 
     async def start(self) -> None:
         opener = self.connect or _default_connect
@@ -1639,6 +1661,7 @@ class RealtimeTalk:
             if not isinstance(event, dict):
                 continue
             check_speech_quota(event)
+            self.record_usage(event)
             kind = str(event.get("type", ""))
             if self.input_paused:
                 if kind.startswith("input_audio_buffer.speech_"):

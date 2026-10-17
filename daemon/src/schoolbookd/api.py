@@ -257,6 +257,11 @@ class Host:
                 task.add_done_callback(self.picture_tasks.discard)
             return result
 
+        usage_learner_id = self.learner_id
+
+        def record_usage(kind: str, event_id: str, model: str, usage: object) -> None:
+            self.runtime.store.record_api_usage(usage_learner_id, kind, event_id, model, usage)
+
         talk = RealtimeTalk(
             api_key=self.openai_api_key,
             instructions=instructions,
@@ -267,6 +272,7 @@ class Host:
                                   video_guidance=profile.video_guidance),
             voice=voice,
             tutor_name=tutor_name,
+            on_usage=record_usage,
         )
         self.picture_talk = talk
         return talk

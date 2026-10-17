@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Record per-learner speech and transcription usage counters to help identify spending, without duplicating conversation text or credentials in usage records.
+
 ## [0.12.0] - 2026-10-16
 
 ### Added

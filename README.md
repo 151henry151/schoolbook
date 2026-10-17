@@ -73,6 +73,8 @@ If speech stops immediately because OpenAI reports exhausted API credit, the chi
 
 For each speech turn, the finalized transcription shown on screen replaces the corresponding audio message in the tutor’s conversation before a reply is requested. This gives the tutor the same words the parent sees, rather than a separate interpretation of the audio. Names, numbers, and meaningful words are preserved. Unrecognized audio is discarded; a transcription failure shows a recoverable microphone error. Spoken replies still use OpenAI Realtime audio.
 
+Version 0.13.0 adds migration `0004` and the SQLite `api_usage` table for per-learner Realtime response and transcription usage, including cached/text/audio token details when supplied by OpenAI. Records contain model names, event identifiers, timestamps, and numeric counters, without transcript text or credentials. Learner deletion removes these records. These counters start with the update, are not yet displayed in the parent console, and are not an invoice: image requests and usage lost during abrupt disconnection are not included. Rejecting a bad completed transcript prevents downstream tutor usage but cannot undo the transcription charge. The current Realtime model and voice remain unchanged.
+
 While a song or video is playing, microphone capture is stopped and the backend ignores speech input, so talking cannot interrupt playback. Pause or close the player to talk to the tutor again.
 
 The main screen shows the laptop's battery percentage at the top left, with a lightning bolt while charging and a red indicator at 20% or below when discharging. It refreshes every 30 seconds and is hidden while a video, song player, or game is open. Machines without readable battery information show no indicator.

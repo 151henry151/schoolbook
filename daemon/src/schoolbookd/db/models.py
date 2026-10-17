@@ -244,3 +244,13 @@ class VideoWatch(Base):
     learner_id: Mapped[str] = mapped_column(ForeignKey("learners.id"), index=True)
     video_id: Mapped[str] = mapped_column(ForeignKey("videos.id"))
     watched_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
+
+
+class ApiUsage(Base):
+    __tablename__ = "api_usage"
+    id: Mapped[str] = mapped_column(String, primary_key=True)
+    learner_id: Mapped[str] = mapped_column(ForeignKey("learners.id"))
+    kind: Mapped[str] = mapped_column(String)
+    model: Mapped[str] = mapped_column(String)
+    usage_json: Mapped[str] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)

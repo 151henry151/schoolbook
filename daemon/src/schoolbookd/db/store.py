@@ -14,6 +14,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session, sessionmaker
 
 from schoolbookd.db.models import (
+    ApiUsage,
     AuditLog,
     ContentRequest,
     Flag,
@@ -50,6 +51,21 @@ class Store:
 
     def session(self) -> Session:
         return self._factory()
+
+    def record_api_usage(self, learner_id: str, kind: str, event_id: str,
+                         model: str, usage: object) -> None:
+        from schoolbookd.usage import usage_counters
+
+        counters = usage_counters(usage)
+        if not counters or not event_id:
+            return
+        key = kind + ":" + event_id
+        with self.session() as db:
+            if db.get(ApiUsage, key) is not None or db.get(Learner, learner_id) is None:
+                return
+            db.add(ApiUsage(id=key, learner_id=learner_id, kind=kind, model=model,
+                            usage_json=json.dumps(counters)))
+            db.commit()
 
     def audit(self, db: Session, actor: str, action: str, detail: dict[str, object]) -> None:
         db.add(AuditLog(id=_id(), actor=actor, action=action, detail_json=json.dumps(detail)))
@@ -633,7 +649,7 @@ class Store:
                         db.delete(call)
                     db.delete(turn)
                 db.delete(session_row)
-            for model in (Observation, Interest, Note, SkillState, ContentRequest):
+            for model in (Observation, Interest, Note, SkillState, ContentRequest, ApiUsage):
                 column = model.learner_id
                 for row in db.scalars(select(model).where(column == learner_id)):
                     db.delete(row)
