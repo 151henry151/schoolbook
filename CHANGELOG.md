@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.12.0] - 2026-10-16
+
 ### Added
 
 - Add Hannah, age four, with a child-friendly learner chooser, preschool teaching and video guidance, age-aware pictures, separate learning/media history, and a learner selector in the parent console. Switching cancels the previous conversation and preserves existing learner records.
@@ -15,6 +17,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 
 - Explain exhausted speech-service credit on screen instead of silently losing listening; preserve microphone retry after credit is replenished.
+
+### Changed
+
+- Update the shared protocol package to 1.3.0 for learner selection; wire protocol major 1 remains compatible.
 
 ## [0.11.0] - 2026-10-16
 

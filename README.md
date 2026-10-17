@@ -2,13 +2,13 @@
 
 Schoolbook is a locked-down Linux learning environment for children sharing a laptop. The machine boots into a kiosk. The child talks with a tutor, sees a full-screen board, watches vetted videos, and can open a short list of educational apps. A parent console on a separate port shows what happened.
 
-Version 0.11.0 adds verified albums in track order, direct GCompris activities with English voices, and video history that favors unseen videos to the software described in [docs/design-spec.md](docs/design-spec.md). Version 1.0.0 waits for a real pilot with a parent nearby. `schoolbook` starts a cage kiosk for the current session. It does not replace the machine's login manager; `packaging/install.sh` is the path that boots straight into Schoolbook.
+Version 0.12.0 adds Hannah’s preschool profile, learner switching, separate parent-console views, child media volume controls, and visible speech-service errors to the software described in [docs/design-spec.md](docs/design-spec.md). Version 1.0.0 waits for a real pilot with a parent nearby. `schoolbook` starts a cage kiosk for the current session. It does not replace the machine's login manager; `packaging/install.sh` is the path that boots straight into Schoolbook.
 
 ## Layout
 
 - `daemon/` — `schoolbookd`, the tutor, database, and HTTP API
 - `session/` — `schoolbook-session`, the allowlisted app launcher
-- `protocol/` — shared message models, package 1.2.0 / wire protocol major 1
+- `protocol/` — shared message models, package 1.3.0 / wire protocol major 1
 - `ui/` — the child's screen
 - `console/` — the parent console
 - `prompts/`, `profiles/`, `skills/`, `apps.d/` — shipped content
