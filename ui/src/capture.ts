@@ -32,7 +32,7 @@ export function embedUrl(videoId: string, origin = pageOrigin()): string {
     throw new Error("video id must stay a YouTube id");
   }
   const originPart = origin ? `&origin=${encodeURIComponent(origin)}` : "";
-  return `https://www.youtube-nocookie.com/embed/${videoId}?rel=0&controls=0&modestbranding=1&iv_load_policy=3&autoplay=1&enablejsapi=1${originPart}`;
+  return `https://www.youtube-nocookie.com/embed/${videoId}?rel=0&controls=0&modestbranding=1&iv_load_policy=3&autoplay=1&mute=1&enablejsapi=1${originPart}`;
 }
 
 export type PlayerTarget = {
@@ -50,9 +50,9 @@ export function playerCommand(
   target.postMessage(JSON.stringify({ event: "command", func, args }), "https://www.youtube-nocookie.com");
 }
 
-export function startEmbeddedPlayer(target: PlayerTarget | null | undefined): void {
+export function startEmbeddedPlayer(target: PlayerTarget | null | undefined, volume = 100): void {
+  playerCommand(target, "setVolume", [volume]);
   playerCommand(target, "unMute");
-  playerCommand(target, "setVolume", [100]);
   playerCommand(target, "playVideo");
 }
 

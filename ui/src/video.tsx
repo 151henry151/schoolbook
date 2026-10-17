@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // SPDX-FileCopyrightText: 2026 Schoolbook contributors
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import {
   embedUrl,
   playerCommand,
@@ -13,6 +13,7 @@ import {
 } from "./capture";
 import { VideoWatchTracker } from "./videoWatch";
 import { hideVideoCursor, VIDEO_CURSOR_IDLE_MS } from "./cursor";
+import { useMediaVolume, VolumeControls } from "./volume";
 
 export function VideoOverlay({
   videoId,
@@ -46,6 +47,9 @@ export function VideoOverlay({
   useEffect(() => { watch.current = new VideoWatchTracker(); finished.current = false; }, [videoId]);
   const [localPaused, setLocalPaused] = useState(paused);
   const [idle, setIdle] = useState(!paused);
+  const [volume, changeVolume] = useMediaVolume();
+  const volumeRef = useRef(volume);
+  volumeRef.current = volume;
 
   function finish(reason: "close" | "ended") {
     if (finished.current) return;
@@ -77,11 +81,21 @@ export function VideoOverlay({
         return;
       }
       if (!youtubePlayerReady(event.data)) return;
-      startEmbeddedPlayer(player ?? frame.current?.contentWindow ?? undefined);
+      startEmbeddedPlayer(player ?? frame.current?.contentWindow ?? undefined, volumeRef.current);
     }
     window.addEventListener("message", onMessage);
     return () => window.removeEventListener("message", onMessage);
   }, [audioOnly, player, videoId]);
+
+  useLayoutEffect(() => {
+    if (audioOnly) {
+      if (audio.current) audio.current.volume = volume / 100;
+    } else {
+      const target = player ?? frame.current?.contentWindow ?? undefined;
+      playerCommand(target, "setVolume", [volume]);
+      playerCommand(target, "unMute");
+    }
+  }, [audioOnly, player, videoId, volume]);
 
   useEffect(() => {
     setLocalPaused(paused);
@@ -172,6 +186,7 @@ export function VideoOverlay({
       {audioOnly ? <button type="button" className="song-toggle" aria-label={localPaused ? "Play music" : "Pause music"} onClick={toggle}>
         <svg viewBox="0 0 48 48" aria-hidden="true">{localPaused ? <path d="M15 8L39 24 15 40Z" fill="currentColor" /> : <><rect x="12" y="9" width="9" height="30" rx="2" fill="currentColor" /><rect x="27" y="9" width="9" height="30" rx="2" fill="currentColor" /></>}</svg>
       </button> : null}
+      <VolumeControls volume={volume} onChange={changeVolume} />
       <button
         type="button"
         className="video-close"

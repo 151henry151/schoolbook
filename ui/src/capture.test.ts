@@ -23,22 +23,23 @@ test("video embeds stay on the nocookie domain without player controls", () => {
   expect(url).toContain("rel=0");
   expect(url).toContain("controls=0");
   expect(url).toContain("autoplay=1");
+  expect(url).toContain("mute=1");
   expect(url).toContain("enablejsapi=1");
   expect(url).toContain("origin=");
   expect(() => embedUrl("https://evil.example")).toThrow();
 });
 
-test("startEmbeddedPlayer unmutes then plays", () => {
+test.each([undefined, 37, 0])("startEmbeddedPlayer sets volume %s before unmuting and playing", (volume) => {
   const target = { postMessage: vi.fn() };
-  startEmbeddedPlayer(target);
+  startEmbeddedPlayer(target, volume);
   expect(target.postMessage).toHaveBeenNthCalledWith(
     1,
-    JSON.stringify({ event: "command", func: "unMute", args: [] }),
+    JSON.stringify({ event: "command", func: "setVolume", args: [volume ?? 100] }),
     "https://www.youtube-nocookie.com",
   );
   expect(target.postMessage).toHaveBeenNthCalledWith(
     2,
-    JSON.stringify({ event: "command", func: "setVolume", args: [100] }),
+    JSON.stringify({ event: "command", func: "unMute", args: [] }),
     "https://www.youtube-nocookie.com",
   );
   expect(target.postMessage).toHaveBeenNthCalledWith(

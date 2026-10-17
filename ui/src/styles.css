@@ -210,6 +210,43 @@ button { min-height: 64px; min-width: 64px; font-size: 1.4rem; }
 }
 .song-mark svg { width: 8rem; height: 8rem; }
 .video-cover { position: absolute; inset: 0; z-index: 11; }
+.media-volume {
+  position: absolute;
+  top: 1rem;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 26;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.5rem 0.75rem;
+  border-radius: 1.2rem;
+  background: rgba(246, 239, 226, 0.96);
+  color: #2a6f7f;
+  box-sizing: border-box;
+}
+.media-volume .volume-speaker { width: 2rem; height: 2rem; flex-shrink: 0; }
+.volume-speaker path:not(:first-child) { fill: none; stroke: currentColor; stroke-width: 2.5; stroke-linecap: round; }
+.media-volume button {
+  width: 64px;
+  padding: 0;
+  border: 2px solid #2a6f7f;
+  border-radius: 50%;
+  background: #fff8e9;
+  color: #2a6f7f;
+  font-size: 2.4rem;
+  line-height: 1;
+}
+.media-volume button:disabled { opacity: 0.45; }
+.media-volume input { width: 8rem; height: 3rem; margin: 0; accent-color: #2a6f7f; }
+.media-volume output { min-width: 3.2rem; text-align: right; font-size: 1.1rem; }
+.media-volume :focus-visible { outline: 3px solid #e07a3d; outline-offset: 3px; }
+@media (max-width: 600px) {
+  .media-volume { top: 6.5rem; max-width: calc(100vw - 2rem); }
+  .media-volume input { width: 5rem; min-width: 2rem; }
+  .media-volume button { min-width: 48px; min-height: 48px; width: 48px; flex-shrink: 0; }
+  .media-volume output { display: none; }
+}
 .app-overlay {
   position: fixed;
   inset: 0;

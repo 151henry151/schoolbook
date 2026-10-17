@@ -104,6 +104,8 @@ Launching or exiting an activity does **not** prove the child completed it. Requ
 
 If speech stops immediately because OpenAI reports exhausted API credit, the child screen explains that a grown-up must replenish the account at [OpenAI API billing](https://platform.openai.com/settings/organization/billing/). After adding credit, tap the microphone again; rebooting cannot fix an exhausted account. Speech connection failures also show a visible retry message.
 
+Both music and video players show large **− / + volume buttons** and a slider at the top. Each button changes volume by 10 percentage points; the slider covers 0% (silent) to 100%. The setting is shared between songs and videos and saved in the kiosk browser, including across tracks and restarts. It changes media playback volume only; tutor speech and system volume are unaffected. Adjusting volume does not pause playback or enable the microphone.
+
 ## License
 
 GPL-3.0-or-later. See [LICENSE](LICENSE) and [NOTICE](NOTICE).
