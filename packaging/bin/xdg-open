@@ -1,0 +1,5 @@
+#!/bin/sh
+# SPDX-License-Identifier: GPL-3.0-or-later
+# SPDX-FileCopyrightText: 2026 Schoolbook contributors
+logger -t schoolbook-xdg-open "blocked: $*"
+exit 0

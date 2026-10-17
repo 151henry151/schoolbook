@@ -174,7 +174,7 @@ Voice is a three-stage pipeline — speech-to-text, Claude, text-to-speech — b
 
 ### Offline and failure behaviour
 
-If the Claude API or STT is unreachable, the screen shows a friendly "the tutor is resting" message with the offline app shelf (GCompris and the other launchable apps). The daemon retries in the background and the tutor returns when the network does.
+If the Claude API or STT is unreachable, the screen shows a friendly "the tutor is resting" message with the offline app shelf (GCompris and the other launchable apps) and a Wi-Fi picker so a parent can join a guest network. The daemon retries in the background and the tutor returns when the network does.
 
 ## 6. Tutor agent
 

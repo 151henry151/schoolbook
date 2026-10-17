@@ -1,0 +1,114 @@
+#!/bin/sh
+# SPDX-License-Identifier: GPL-3.0-or-later
+# SPDX-FileCopyrightText: 2026 Schoolbook contributors
+export XDG_RUNTIME_DIR="${XDG_RUNTIME_DIR:-/run/user/0}"
+mkdir -p "$XDG_RUNTIME_DIR"
+chmod 700 "$XDG_RUNTIME_DIR"
+# systemd --user skips PipeWire as root (ConditionUser=!root) and then
+# removes /run/user/0/pulse. Keep sockets where those units cannot reach.
+export PIPEWIRE_RUNTIME_DIR=/tmp/schoolbook-audio
+export PULSE_RUNTIME_PATH=/tmp/schoolbook-audio/pulse
+export PULSE_SERVER=unix:/tmp/schoolbook-audio/pulse/native
+mkdir -p "$PIPEWIRE_RUNTIME_DIR" "$PULSE_RUNTIME_PATH"
+chmod 700 "$PIPEWIRE_RUNTIME_DIR"
+if [ -z "${DBUS_SESSION_BUS_ADDRESS:-}" ] && command -v dbus-launch >/dev/null; then
+  eval "$(dbus-launch --sh-syntax)"
+fi
+export XDG_RUNTIME_DIR PIPEWIRE_RUNTIME_DIR PULSE_RUNTIME_PATH PULSE_SERVER
+mkdir -p /root/.config/pulse
+cat > /root/.config/pulse/client.conf << EOF
+default-server = unix:/tmp/schoolbook-audio/pulse/native
+autospawn = no
+EOF
+xsetroot -solid "#f6efe2" || true
+
+# The CF-30 firmware mute is separate from ALSA/PipeWire mute and can survive
+# rebooting between operating systems. Clear it once, leaving mute keys usable.
+for hardware_mute in /sys/bus/acpi/devices/MAT0019:*/mute; do
+  if [ -w "$hardware_mute" ]; then
+    printf '0\n' > "$hardware_mute" || true
+  fi
+done
+
+pulse_ready() {
+  command -v pactl >/dev/null && pactl info >/dev/null 2>&1
+}
+
+prefer_mic() {
+  # Jack sense marks the CF-30 internal mic "not available" and Pulse then
+  # defaults to the speaker monitor, so Chromium hears silence. A remapped
+  # source stays selected as the default.
+  master=$(pactl list short sources | awk '/alsa_input\./{print $2; exit}')
+  if [ -n "$master" ] && ! pactl list short sources | grep -q '[	]schoolbook-mic[	]'; then
+    pactl load-module module-remap-source source_name=schoolbook-mic master="$master" \
+      source_properties=device.description=Microphone >/dev/null 2>&1 || true
+  fi
+  source=schoolbook-mic
+  if ! pactl list short sources | grep -q '[	]schoolbook-mic[	]'; then
+    source=$master
+  fi
+  if [ -n "$source" ]; then
+    export PULSE_SOURCE="$source"
+    pactl set-default-source "$source" 2>/dev/null || true
+    pactl set-source-mute "$source" 0 2>/dev/null || true
+    pactl set-source-volume "$source" 100% 2>/dev/null || true
+    mkdir -p /root/.config/pulse
+    cat > /root/.config/pulse/client.conf << EOF
+default-server = unix:/tmp/schoolbook-audio/pulse/native
+default-source = $source
+autospawn = no
+EOF
+  fi
+  amixer -q sset 'Mic Boost' 3 2>/dev/null || true
+  amixer -q sset Capture cap 100% 2>/dev/null || true
+  amixer -q sset 'Capture',1 cap 90% 2>/dev/null || true
+  amixer -q sset Digital 90% 2>/dev/null || true
+  pactl set-sink-mute @DEFAULT_SINK@ 0 2>/dev/null || true
+  pactl set-sink-volume @DEFAULT_SINK@ 100% 2>/dev/null || true
+  amixer -q sset Master 100% unmute 2>/dev/null || true
+  amixer -q sset Speaker 100% unmute 2>/dev/null || true
+  amixer -q sset PCM 100% 2>/dev/null || true
+}
+
+start_audio() {
+  if pulse_ready; then
+    return
+  fi
+  rm -f "$PULSE_RUNTIME_PATH/native"
+  if ! pgrep -x pipewire >/dev/null; then
+    pipewire &
+    sleep 0.4
+  fi
+  if ! pgrep -x wireplumber >/dev/null; then
+    wireplumber &
+  fi
+  pkill -x pipewire-pulse 2>/dev/null || true
+  pipewire-pulse &
+}
+
+if command -v pipewire >/dev/null; then
+  rm -f "$PULSE_RUNTIME_PATH/native"
+  start_audio
+  i=0
+  while [ "$i" -lt 20 ]; do
+    if pulse_ready; then
+      prefer_mic
+      break
+    fi
+    i=$((i + 1))
+    sleep 0.25
+  done
+  (
+    while true; do
+      sleep 2
+      start_audio
+      if pulse_ready; then
+        prefer_mic
+      fi
+    done
+  ) &
+fi
+schoolbook_root="${SCHOOLBOOK_ROOT:-/root/schoolbook}"
+openbox --config-file "$schoolbook_root/packaging/openbox/rc.xml" &
+# Do not exec: replacing this shell SIGHUPs PipeWire and Chromium loses the mic.
+"$schoolbook_root/.venv/bin/schoolbook"
