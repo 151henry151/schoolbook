@@ -11,6 +11,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Exclude each child's previously watched videos from general searches and block accidental repeats at playback. Specifically requested videos remain available; ambiguous repeat requests require clarification.
 - Search additional YouTube pages when cached unseen choices run out, retain search progress across restarts, and refresh exhausted searches after a day instead of repeatedly returning the same small set.
+- Hide video volume controls and the red close button until mouse movement or touch, then hide them after two idle seconds. Keep controls visible for paused videos and music.
 
 ## [0.13.0] - 2026-10-16
 

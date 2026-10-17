@@ -89,6 +89,8 @@ For an existing CF-30 installation, update the application and rebuild `ui/`, in
 
 Both music and video players show large **− / + volume buttons** and a slider at the top. Each button changes volume by 10 percentage points; the slider covers 0% (silent) to 100%. The setting is shared between songs and videos and saved in the kiosk browser, including across tracks and restarts. It changes media playback volume only; tutor speech and system volume are unaffected. Adjusting volume does not pause playback or enable the microphone.
 
+Video playback hides the video volume controls and red **×** along with the idle cursor. Moving the mouse or touching the player reveals them for two seconds after the last movement. Paused-video controls and music controls remain visible.
+
 The child’s song screen has a large **pause/play** button. Pausing allows speech again; resuming stops microphone capture. Closing a song cancels the remaining queue.
 
 Video watch history is separate from music history. A video counts as watched only after at least 50% of its distinct content has actually played in that viewing. Pauses, buffering, seeking over content, and replaying the same short segment do not add coverage. The browser reports the halfway milestone once; the daemon checks the current video and duration before saving it per learner in SQLite. Search results include `watch_count` and `last_watched_at`; general requests receive unseen videos only. The tutor can also call `get_video_history` to identify a specifically requested repeat. Old play counts are not converted because they do not establish half-watched completion. Migration `0003` adds `video_watches`; existing song and learner data remain intact.

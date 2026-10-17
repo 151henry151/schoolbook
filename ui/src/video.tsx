@@ -47,6 +47,7 @@ export function VideoOverlay({
   useEffect(() => { watch.current = new VideoWatchTracker(); finished.current = false; }, [videoId]);
   const [localPaused, setLocalPaused] = useState(paused);
   const [idle, setIdle] = useState(!paused);
+  const idleTimer = useRef<number | undefined>(undefined);
   const [volume, changeVolume] = useMediaVolume();
   const volumeRef = useRef(volume);
   volumeRef.current = volume;
@@ -113,10 +114,19 @@ export function VideoOverlay({
   }, [audioOnly, paused, player, videoId]);
 
   useEffect(() => {
-    if (paused || idle) return;
-    const timer = window.setTimeout(() => setIdle(true), VIDEO_CURSOR_IDLE_MS);
-    return () => window.clearTimeout(timer);
-  }, [paused, idle]);
+    if (localPaused || idle || audioOnly) return;
+    window.clearTimeout(idleTimer.current);
+    idleTimer.current = window.setTimeout(() => setIdle(true), VIDEO_CURSOR_IDLE_MS);
+    return () => window.clearTimeout(idleTimer.current);
+  }, [localPaused, idle, audioOnly, videoId]);
+
+  function revealControls() {
+    setIdle(false);
+    window.clearTimeout(idleTimer.current);
+    if (!localPaused && !audioOnly) {
+      idleTimer.current = window.setTimeout(() => setIdle(true), VIDEO_CURSOR_IDLE_MS);
+    }
+  }
 
   function toggle() {
     if (audioOnly) {
@@ -150,14 +160,13 @@ export function VideoOverlay({
         "video-overlay",
         hidden ? "is-hidden" : "",
         audioOnly ? "audio-only" : "",
-        !audioOnly && hideVideoCursor(paused, idle) ? "cursor-idle" : "",
+        !audioOnly && hideVideoCursor(localPaused, idle) ? "cursor-idle" : "",
       ]
         .filter(Boolean)
         .join(" ")}
       aria-label={audioOnly ? "song" : "video"}
-      onMouseMove={() => {
-        if (!paused) setIdle(false);
-      }}
+      onMouseMove={revealControls}
+      onTouchStart={revealControls}
     >
       {audioOnly ? (
         <audio ref={audio} src={songUrl(videoId)} autoPlay onPlaying={onPlaying} onError={() => { setLocalPaused(true); onPausedChange?.(true); }} onEnded={() => finish("ended")} />
@@ -186,18 +195,20 @@ export function VideoOverlay({
       {audioOnly ? <button type="button" className="song-toggle" aria-label={localPaused ? "Play music" : "Pause music"} onClick={toggle}>
         <svg viewBox="0 0 48 48" aria-hidden="true">{localPaused ? <path d="M15 8L39 24 15 40Z" fill="currentColor" /> : <><rect x="12" y="9" width="9" height="30" rx="2" fill="currentColor" /><rect x="27" y="9" width="9" height="30" rx="2" fill="currentColor" /></>}</svg>
       </button> : null}
-      <VolumeControls volume={volume} onChange={changeVolume} />
-      <button
-        type="button"
-        className="video-close"
-        aria-label="close video"
-        onClick={(event) => {
-          event.stopPropagation();
-          finish("close");
-        }}
-      >
-        ×
-      </button>
+      <div hidden={!audioOnly && hideVideoCursor(localPaused, idle)}>
+        <VolumeControls volume={volume} onChange={changeVolume} />
+        <button
+          type="button"
+          className="video-close"
+          aria-label="close video"
+          onClick={(event) => {
+            event.stopPropagation();
+            finish("close");
+          }}
+        >
+          ×
+        </button>
+      </div>
     </section>
   );
 }

@@ -101,6 +101,7 @@ test("battery appears on home and talk screens, hides for video, and returns aft
   });
   expect(screen.getByTitle("video")).toBeTruthy();
   expect(screen.queryByRole("img", { name: /Battery/ })).toBeNull();
+  fireEvent.mouseMove(screen.getByLabelText("video"));
   fireEvent.click(screen.getByRole("button", { name: "close video" }));
   expect(await screen.findByRole("img", { name: "Battery 82%, charging" })).toBeTruthy();
 });
@@ -289,6 +290,7 @@ test.each([false, true])("playing media (audio only: %s) mutes input until pause
   fireEvent.click(screen.getByLabelText("pause or play"));
   await vi.waitFor(() => expect(listeners.length).toBe(0));
   expect(socket.send).toHaveBeenCalledWith(JSON.stringify({ type: "video_ui", action: "resume", video_id: "abcdefghijk" }));
+  if (!audioOnly) fireEvent.mouseMove(screen.getByLabelText("video"));
   fireEvent.click(screen.getByRole("button", { name: "close video" }));
   await vi.waitFor(() => expect(listeners.length).toBe(1));
   expect(socket.send).toHaveBeenCalledWith(JSON.stringify({ type: "video_ui", action: "done", video_id: "abcdefghijk" }));

@@ -16,6 +16,8 @@ test("the overlay autoplays without written play pause or done labels", () => {
   expect(screen.queryByRole("button", { name: "Play" })).toBeNull();
   expect(screen.queryByRole("button", { name: "Pause" })).toBeNull();
   expect(screen.queryByRole("button", { name: "Done" })).toBeNull();
+  expect(screen.queryByRole("button", { name: "close video" })).toBeNull();
+  fireEvent.mouseMove(screen.getByLabelText("video"));
   expect(screen.getByRole("button", { name: "close video" })).toBeTruthy();
   view.unmount();
   expect(screen.queryByTitle("video")).toBeNull();
@@ -40,6 +42,7 @@ test("a tap pauses then resumes and the X closes the video", () => {
     "https://www.youtube-nocookie.com",
   );
   expect(paused).toHaveBeenLastCalledWith(false);
+  fireEvent.mouseMove(screen.getByLabelText("video"));
   fireEvent.click(screen.getByRole("button", { name: "close video" }));
   expect(closed).toHaveBeenCalledOnce();
 });
@@ -192,6 +195,7 @@ test("video volume applies on readiness and changes without pausing or restartin
   const target = { postMessage: vi.fn() };
   const paused = vi.fn();
   render(<VideoOverlay videoId="abcdefghijk" onClose={() => {}} onPausedChange={paused} player={target} />);
+  fireEvent.mouseMove(screen.getByLabelText("video"));
   expect((screen.getByRole("slider", { name: "Playback volume" }) as HTMLInputElement).value).toBe("40");
   // A change before the embedded player is ready must survive its onReady event.
   fireEvent.click(screen.getByRole("button", { name: "Volume down" }));
@@ -232,6 +236,7 @@ test("song volume reaches silence, stays bounded, and carries over to the next p
   view.unmount();
   const target = { postMessage: vi.fn() };
   render(<VideoOverlay videoId="anothervid1" onClose={() => {}} player={target} />);
+  fireEvent.mouseMove(screen.getByLabelText("video"));
   expect((screen.getByRole("slider") as HTMLInputElement).value).toBe("35");
   expect(target.postMessage).toHaveBeenCalledWith(
     JSON.stringify({ event: "command", func: "setVolume", args: [35] }), "https://www.youtube-nocookie.com",
@@ -242,6 +247,7 @@ test("song volume reaches silence, stays bounded, and carries over to the next p
 test.each(["not a volume", "NaN", "-1", "101", ""])("invalid saved volume %s does not break playback", (saved) => {
   localStorage.setItem("schoolbook.media-volume", saved);
   render(<VideoOverlay videoId="abcdefghijk" onClose={() => {}} />);
+  fireEvent.mouseMove(screen.getByLabelText("video"));
   expect((screen.getByRole("slider") as HTMLInputElement).value).toBe("100");
 });
 
@@ -249,7 +255,34 @@ test("volume still works when browser storage is blocked", () => {
   const read = vi.spyOn(Storage.prototype, "getItem").mockImplementation(() => { throw new Error("blocked"); });
   const write = vi.spyOn(Storage.prototype, "setItem").mockImplementation(() => { throw new Error("blocked"); });
   render(<VideoOverlay videoId="abcdefghijk" onClose={() => {}} />);
+  fireEvent.mouseMove(screen.getByLabelText("video"));
   fireEvent.click(screen.getByRole("button", { name: "Volume down" }));
   expect((screen.getByRole("slider") as HTMLInputElement).value).toBe("90");
   read.mockRestore(); write.mockRestore();
+});
+
+test("video controls hide until movement, stay visible during movement, and return on touch", () => {
+  vi.useFakeTimers();
+  const view = render(<VideoOverlay videoId="abcdefghijk" onClose={() => {}} />);
+  const overlay = screen.getByLabelText("video");
+  expect(screen.queryByRole("slider")).toBeNull();
+  expect(screen.queryByRole("button", { name: "close video" })).toBeNull();
+  fireEvent.mouseMove(overlay);
+  expect(screen.getByRole("slider")).toBeTruthy();
+  expect(screen.getByRole("button", { name: "close video" })).toBeTruthy();
+  act(() => vi.advanceTimersByTime(1500));
+  fireEvent.mouseMove(overlay);
+  act(() => vi.advanceTimersByTime(1500));
+  expect(screen.getByRole("slider")).toBeTruthy(); // Two seconds since last movement, not first movement.
+  act(() => vi.advanceTimersByTime(600));
+  expect(screen.queryByRole("slider")).toBeNull();
+  expect(screen.queryByRole("button", { name: "close video" })).toBeNull();
+  fireEvent.touchStart(overlay);
+  expect(screen.getByRole("slider")).toBeTruthy();
+  view.rerender(<VideoOverlay videoId="abcdefghijk" paused onClose={() => {}} />);
+  act(() => vi.advanceTimersByTime(10000));
+  expect(screen.getByRole("slider")).toBeTruthy();
+  expect(screen.getByRole("button", { name: "close video" })).toBeTruthy();
+  view.unmount();
+  vi.useRealTimers();
 });
