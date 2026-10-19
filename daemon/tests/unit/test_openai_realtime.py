@@ -1291,3 +1291,21 @@ def test_repetitive_transcription_is_not_saved_or_sent_to_the_tutor() -> None:
                                  "item_id": "loop1", "transcript": text})
     assert [item["type"] for item in ui] == ["error"]
     assert [item["type"] for item in outbound] == ["conversation.item.delete", "input_audio_buffer.clear"]
+
+
+def test_video_briefing_keeps_corrections_after_the_first_sentence():
+    request = (
+        'That was another video that we have already seen. We want an entirely new video about snakes. '
+        'Maybe about something else about snakes, like not just the history of how they came to evolve, '
+        'but instead a video about some other thing about snakes. Maybe how to care for them, '
+        'or something like that.'
+    )
+    mapper = RealtimeMapper(child_name='Arum')
+    _, outbound = mapper.handle({'type': 'conversation.item.input_audio_transcription.completed',
+                                 'item_id': 'snake_care', 'transcript': request})
+    notes = [e['item']['content'][0]['text'] for e in outbound
+             if e.get('item', {}).get('role') == 'system']
+    briefing = next(note for note in notes if 'full request' in note)
+    assert request in briefing
+    assert 'Honor corrections and rejected topics' in briefing
+    assert 'even if stopped early' in briefing

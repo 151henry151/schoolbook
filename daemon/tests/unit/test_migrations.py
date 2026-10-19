@@ -76,3 +76,28 @@ def test_video_history_upgrade_preserves_prior_song_history_schema(tmp_path: Pat
     assert {'video_watches', 'song_plays'} <= set(inspect(engine).get_table_names())
     with engine.connect() as db:
         assert db.scalar(text("SELECT value_json FROM settings WHERE key = 'keep'")) == '42'
+
+
+def test_selection_upgrade_preserves_watches_without_inventing_selections(tmp_path: Path):
+    from sqlalchemy import text
+
+    from schoolbookd.db.models import Video
+    from schoolbookd.db.engine import session_factory
+    from schoolbookd.db.store import Store
+
+    engine = make_engine(tmp_path / 'schoolbook.db')
+    migrate(engine)
+    store = Store(session_factory(engine))
+    store.upsert_learner(learner_id='kid', first_name='Arum', birth_year=2020)
+    store.save_video(Video(id='oldvideo123', source='youtube', source_ref='oldvideo123',
+                           title='Snake history', verdict='approved', times_played=10))
+    store.record_video_watch('kid', 'oldvideo123')
+    with engine.begin() as db:
+        db.execute(text('DROP TABLE video_selections'))
+        db.execute(text("UPDATE alembic_version SET version_num = '0004'"))
+    migrate(engine)
+    assert store.selected_video_ids('kid') == {'oldvideo123'}
+    history = store.video_selection_history('kid')
+    assert history[0]['watch_count'] == 1
+    assert history[0]['selection_count'] == 0  # Global play counts cannot identify the learner.
+    assert store.video('oldvideo123').times_played == 10

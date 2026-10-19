@@ -454,3 +454,38 @@ def test_console_views_are_scoped_without_switching_child(tmp_path: Path) -> Non
     assert client.get("/api/learner?learner_id=kid").json()["first_name"] == "Sam"
     assert client.get("/api/learner?learner_id=missing").status_code == 404
     assert host.learner_id == "kid" and host.live is old
+
+
+def test_realtime_records_video_choices_against_the_child_request(tmp_path: Path):
+    import asyncio
+    import json
+
+    from sqlalchemy import select
+    from schoolbookd.db.models import ToolCall, Turn
+
+    host = _host(tmp_path)
+    host.runtime.approve_video('snakevideo1', 'How snakes live', 'Science', 1)
+
+    async def check():
+        talk = host.make_realtime()
+        host.note_transcript('child', 'I want to watch a video about snakes')
+        child_id = host.ensure_live().child_turn_id
+        host.note_transcript('tutor', "I'll put on a snake video.")
+        assert talk.execute('play_video', {'video_id': 'snakevideo1'})['playing'] == 'snakevideo1'
+        host.note_transcript('child', 'I want to watch a different video about snakes')
+        assert 'error' in talk.execute('play_video', {'video_id': 'snakevideo1'})
+        with host.runtime.store.session() as db:
+            calls = list(db.execute(select(ToolCall, Turn).join(Turn, Turn.id == ToolCall.turn_id)))
+        assert len(calls) == 2
+        first = next(c for c, t in calls if t.id == child_id)
+        assert json.loads(first.input_json) == {'video_id': 'snakevideo1'}
+        assert json.loads(first.result_json)['playing'] == 'snakevideo1'
+        refused, request = next((c, t) for c, t in calls if t.id != child_id)
+        assert request.text == 'I want to watch a different video about snakes'
+        assert refused.allowed == 0 and 'error' in json.loads(refused.result_json)
+        host.cancel_speech_work()
+        assert talk.execute('play_video', {'video_id': 'snakevideo1'}) == {'cancelled': True}
+        with host.runtime.store.session() as db:
+            assert len(list(db.scalars(select(ToolCall)))) == 2
+
+    asyncio.run(check())

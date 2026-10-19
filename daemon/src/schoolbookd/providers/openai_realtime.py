@@ -127,15 +127,18 @@ def spoken_child_instructions(
                 "Then wait. Do not play music until the child says yes. "
                 "When the child asks to watch something, treat it as a parent briefing: "
                 f"you have a {age_years}-year-old who wants a video about that topic. "
-                "For general topic requests, show only videos this child has not watched. "
+                "For general topic requests, show only videos not previously selected for this child, "
+                "including videos stopped early. A different/new video must have a new video ID. "
                 "Never replay one just because it matches the topic or there are no new results. "
                 "Use get_video_history to identify a specifically requested repeat. "
                 "Pass that one requested_video_id to search_videos and quote the child's entire current "
                 "request in replay_request for both search_videos and play_video. "
                 "A topic or channel name alone is not a request to repeat a specific video. "
                 "If the requested repeat is ambiguous, ask the child which video before playing. "
-                "Pick something educational that teaches history or science of the topic, "
-                "then call search_videos, vet_video, and play_video. "
+                "Pick something educational matching the child's full request and chosen subtopic. "
+                "History or science can suit a broad request, but never override a request for care, "
+                "habitat, behavior, or another subject, or return an angle the child rejected. "
+                "Then call search_videos, vet_video, and play_video. "
                 "Say you will put on a video about that thing. "
                 "The default for a question is to answer it verbally with words. "
                 "Every time the child asks a question, carefully consider whether a picture "
@@ -694,20 +697,30 @@ def video_watch_briefing(
     topic = video_topic(child_text)
     if topic is None:
         return None
+    request_guidance = (
+        f"The child's full request is: {child_text!r}. "
+        "Preserve the requested subtopic and any requested channel or creator in the search query. "
+        "Honor corrections and rejected topics; do not replace snake care with snake evolution, for example. "
+        "Choose only videos not previously selected for this child, even if stopped early, unless "
+        "the child explicitly requests a specific repeat. If no matching new video is available, "
+        "try another relevant search or explain that; do not substitute an unrelated or repeated video. "
+    )
     if age_years <= 4:
         return (
             f"{name} is {age_years} years old and wants a video about {topic}. "
             "Choose a calm preschool explanation with concrete examples, not an advanced documentary. "
             f"{video_guidance} Preserve any requested channel or creator when age-appropriate. "
-            "Search, vet, and play it. Briefly say you will put on a video about the topic."
+            "Search, vet, and play it. Briefly say you will put on a video about the topic. "
+            + request_guidance
         )
     return (
-        f"You have a {'six' if age_years == 6 else age_years}-year-old named {name} who wants to watch a video about {topic}. "
-        f"Pick something educational that will teach the child something good about the history of {topic} "
-        f"or the science behind {topic}. Pick out a good educational video from YouTube and play it. "
+        f"You have a {'six' if age_years == 6 else age_years}-year-old named {name} "
+        f"who wants to watch a video about {topic}. "
+        "Pick an educational YouTube video matching the full request. History or science are options for "
+        "broad requests, not replacements for the child's chosen subject. "
         f"Do not pick a baby song, nursery cartoon, or Cocomelon-style show. "
         f"When you speak to the child, just say you will put on a video about {topic}. "
-        "Preserve any requested channel or creator in the search query."
+        + request_guidance
     )
 
 Execute = Callable[[str, dict[str, object]], dict[str, object]]
@@ -809,7 +822,8 @@ def session_update(
 
 REALTIME_TOOLS: list[dict[str, object]] = [
     {"type": "function", "name": "get_video_history",
-     "description": "Read this child's recently watched videos (at least 50% played). "
+     "description": "Read this child's selected videos, including early dismissals, and separate "
+                    "watch counts (at least 50% played). "
                     "Use a title-fragment query to find older videos for a specific replay request.",
      "parameters": {"type": "object", "properties": {"query": {"type": "string"}}}},
     {

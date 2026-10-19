@@ -207,7 +207,11 @@ class VideoCatalog:
 
         def available() -> list[VideoCandidate]:
             visible = self._filter([v for v in candidates if v.video_id not in excluded], kind=kind)
-            return rank_for_clean_audio(visible) if song else self._rank(visible)
+            if song:
+                return rank_for_clean_audio(visible)
+            # Preserve YouTube's query relevance. Generic documentary/channel boosts
+            # otherwise move old evolution videos ahead of a specific care request.
+            return rank_for_preschool(visible) if self.preschool else visible
 
         kept = available()
         cursor_key = key + ":page"
@@ -348,7 +352,9 @@ class VideoCatalog:
         matches: list[VideoCandidate] = []
         for video in self.store.approved_videos():
             text = f"{video.title} {video.summary}".lower()
-            if any(word in text for word in words):
+            # A broad match on 'snake' alone must not substitute an evolution video
+            # when the child has narrowed the request to snake care.
+            if all(word in text for word in words):
                 matches.append(self._lookup(video.id) or candidate_from_row(video))
         return self._rank(self._filter(matches))
 

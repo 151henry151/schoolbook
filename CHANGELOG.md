@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.14.1] - 2026-10-19
+
+### Fixed
+
+- Prevent repeat video suggestions even when a child quickly stops the previous video: remember each selection per child across restarts and enforce exclusions in both search and playback. Keep the 50% completion rule for watch counts, and allow specifically requested replays.
+- Preserve the full video request and corrections, retain search relevance instead of promoting familiar documentary channels, and prevent broad fallback matches from replacing a requested subtopic such as snake care.
+- Save spoken-session tool calls alongside the child's request so searches, selections, and refused repeats can be inspected in the conversation log.
+
 ## [0.14.0] - 2026-10-17
 
 ### Changed

@@ -248,7 +248,13 @@ class Host:
         def execute(tool: str, args: dict[str, object]) -> dict[str, object]:
             if generation != self.speech_generation:
                 return {"cancelled": True}
-            result = self.runtime.run_tool(self.ensure_live(), tool, args, defer_pictures=True)
+            live = self.ensure_live()
+            turn_id = live.child_turn_id
+            result = self.runtime.run_tool(live, tool, args, defer_pictures=True)
+            if turn_id:
+                self.runtime.store.add_tool_call(
+                    turn_id, tool, args, result, allowed="error" not in result,
+                )
             if result.get("loading") and result.get("image_id"):
                 brief = str(result.get("brief") or result.get("topic") or "")
                 kind = str(result.get("kind") or "diagram")
@@ -316,7 +322,9 @@ class Host:
             live.child_request = text
         elif role == "tutor":
             live.tutor_question = text
-        self.runtime.store.add_turn(live.session_id, role, text)
+        turn_id = self.runtime.store.add_turn(live.session_id, role, text)
+        if role == "child":
+            live.child_turn_id = turn_id
 
 
 def _as_datetime(stamp: float) -> datetime:

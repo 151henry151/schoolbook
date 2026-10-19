@@ -300,3 +300,24 @@ def test_legacy_cache_gets_a_fresh_search_when_its_unseen_pool_is_empty(tmp_path
     catalog._remember(key, [_video()])
     assert catalog.search('volcano', exclude_ids={'abcdefghijk'})[0]['video_id'] == 'freshvideo1'
     assert client.tokens == ['']
+
+
+def test_query_relevance_precedes_generic_documentary_boosts(tmp_path: Path):
+    care = _video(video_id='snakecare11', title='Caring for a pet snake',
+                  description='Habitat and feeding.', channel_title='Animal Care')
+    evolution = _video(video_id='snakespast1', title='Ancient snakes science documentary',
+                       channel_title='PBS Eons', description='Evolution and paleontology.')
+    catalog = VideoCatalog(_store(tmp_path), ScriptSearch([care, evolution]),
+                           CharterReviewer(), CharterReviewer())
+    assert catalog.search('snake care')[0]['video_id'] == 'snakecare11'
+
+
+def test_empty_care_search_does_not_fall_back_to_snake_evolution(tmp_path: Path):
+    store = _store(tmp_path)
+    client = ScriptSearch([_video(title='How ancient snakes evolved', description='Snake evolution.')])
+    catalog = VideoCatalog(store, client, CharterReviewer(), CharterReviewer())
+    catalog.search('snakes')
+    catalog.vet('abcdefghijk')
+    client.videos = []
+    assert catalog.search('snake care') == []
+    assert catalog.search('snake')[0]['video_id'] == 'abcdefghijk'  # Broad request still matches.

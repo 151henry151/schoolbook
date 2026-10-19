@@ -244,3 +244,74 @@ def test_that_video_refers_to_last_played_not_an_older_half_watched_video(tmp_pa
     live.child_request = 'Show me that video again'
     assert 'error' in runtime.run_tool(live, 'play_video', {
         'video_id': 'oldervideo1', 'replay_request': live.child_request})
+
+
+def test_quickly_rejected_snake_videos_are_not_recycled_after_restart(tmp_path: Path):
+    from dataclasses import replace
+
+    store = _store(tmp_path)
+    videos = [replace(_dinosaur(), video_id=vid, title=title) for vid, title in (
+        ('hotplanet11', "How a Hot Planet Created the World's Biggest Snake"),
+        ('snakedebate', 'The Great Snake Debate'),
+        ('snakecare11', 'How to care for a pet snake'),
+    )]
+    client = ScriptSearch(videos)
+    catalog = VideoCatalog(store, client, CharterReviewer(), CharterReviewer())
+    runtime, live = _runtime(store, catalog), _live(store)
+    requests = [
+        'I like to watch videos about snakes.',
+        'I want to watch a different video about snakes.',
+        'That was another video that we have already seen. We want an entirely new video about snakes. '
+        'Maybe how to care for them.',
+    ]
+    chosen = []
+    for request in requests:
+        live.child_request = request
+        result = runtime.run_tool(live, 'search_videos', {'query': 'snakes'})
+        vid = result['candidates'][0]['video_id']
+        assert vid not in chosen
+        catalog.vet(vid)
+        assert 'error' not in runtime.run_tool(live, 'play_video', {'video_id': vid})
+        chosen.append(vid)
+        runtime.video_watched(live, vid, 10, 300)  # Dismissed far short of halfway.
+        runtime.run_tool(live, 'video_control', {'action': 'stop'})
+        # Restart the store/runtime/session, not just the conversation connection.
+        store = Store(session_factory(make_engine(tmp_path / 'schoolbook.db')))
+        catalog = VideoCatalog(store, client, CharterReviewer(), CharterReviewer())
+        runtime, live = _runtime(store, catalog), _live(store)
+    assert store.video_history('kid') == []  # No fabricated halfway watches.
+    assert store.selected_video_ids('kid') == set(chosen)
+    history = runtime.run_tool(live, 'get_video_history', {})['videos']
+    assert all(v['watch_count'] == 0 and v['selection_count'] == 1 for v in history)
+    assert history[0]['video_id'] == 'snakecare11'
+    assert runtime.run_tool(live, 'search_videos', {'query': 'snakes'})['candidates'] == []
+    live.child_request = requests[-1]
+    assert 'error' in runtime.run_tool(live, 'play_video', {
+        'video_id': chosen[0], 'replay_request': live.child_request})
+    # An explicit repeat of the last selection still works across restarts.
+    live.child_request = 'Show me that video again'
+    assert 'error' not in runtime.run_tool(live, 'play_video', {
+        'video_id': 'snakecare11', 'replay_request': live.child_request})
+    assert store.video_history('kid') == []
+    store.upsert_learner(learner_id='hannah', first_name='Hannah', birth_year=2022)
+    other = LiveState(session_id=store.start_session('hannah', 'fake'), learner_id='hannah')
+    assert len(runtime.run_tool(other, 'search_videos', {'query': 'snakes'})['candidates']) == 3
+    assert 'error' not in runtime.run_tool(other, 'play_video', {'video_id': chosen[0]})
+    store.record_song_play('kid', chosen[0])
+    store.record_video_watch('kid', chosen[0])
+    store.delete_learner_data('kid')
+    assert store.selected_video_ids('kid') == set()
+    assert store.selected_video_ids('hannah') == {chosen[0]}
+
+
+def test_selection_exclusions_are_not_limited_to_the_recent_history_page(tmp_path: Path):
+    store = _store(tmp_path)
+    runtime, live = _runtime(store, None), _live(store)
+    for index in range(35):
+        vid = f'video{index:06d}'
+        runtime.approve_video(vid, f'Animal story {index}', 'channel', 1)
+        runtime.run_tool(live, 'play_video', {'video_id': vid})
+    assert len(store.video_selection_history('kid')) == 30
+    assert len(store.selected_video_ids('kid')) == 35
+    assert 'error' in runtime.run_tool(live, 'play_video', {'video_id': 'video000000'})
+    assert store.video_selection_history('kid', query='Animal story 0')[0]['video_id'] == 'video000000'

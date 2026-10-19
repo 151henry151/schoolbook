@@ -246,6 +246,16 @@ class VideoWatch(Base):
     watched_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
 
 
+class VideoSelection(Base):
+    """A video selected for this child, independently of playback completion."""
+
+    __tablename__ = "video_selections"
+    id: Mapped[str] = mapped_column(String, primary_key=True)
+    learner_id: Mapped[str] = mapped_column(ForeignKey("learners.id"), index=True)
+    video_id: Mapped[str] = mapped_column(ForeignKey("videos.id"))
+    selected_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
+
+
 class ApiUsage(Base):
     __tablename__ = "api_usage"
     id: Mapped[str] = mapped_column(String, primary_key=True)

@@ -52,6 +52,7 @@ class LiveState:
     last_video_pause_at: float | None = None
     now_s: float = 0.0
     child_request: str = ""
+    child_turn_id: str | None = None
     tutor_question: str = ""
 
 
@@ -486,9 +487,10 @@ class Runtime:
         if name == "play_video":
             catalog = self.catalog_for(live)
             video_id = str(args["video_id"])
-            if (not args.get("audio_only") and video_id in self.store.watched_video_ids(live.learner_id)
+            if (not args.get("audio_only") and video_id in self.store.selected_video_ids(live.learner_id)
                     and not self._requested_replay(live, video_id, args.get("replay_request"))):
-                return {"error": "This child already watched that video. Search for an unseen video. "
+                return {"error": "This video was already selected for this child, even if stopped before halfway. "
+                        "Search for an unseen video. "
                         "Replay only a specifically requested video, quoting the child's current request."}
             if not args.get("audio_only") and catalog and not catalog.playable(str(args["video_id"])):
                 return {"error": "Choose a video that fits this learner's age profile and duration window."}
@@ -498,6 +500,7 @@ class Runtime:
             live.playing_audio_only = bool(args.get("audio_only"))
             live.playing_video = str(args["video_id"])
             if not live.playing_audio_only:
+                self.store.record_video_selection(live.learner_id, live.playing_video)
                 live.last_video_id = live.playing_video
             live.child_request = ""  # A requested replay authorizes one playback, not future turns.
             live.screen = "video"
@@ -542,10 +545,10 @@ class Runtime:
                 candidates = ([public_candidate(candidate_from_row(row))]
                               if row and catalog.playable(requested_id) else [])
             else:
-                excluded = self.store.watched_video_ids(live.learner_id) if kind == "video" else set()
+                excluded = self.store.selected_video_ids(live.learner_id) if kind == "video" else set()
                 candidates = catalog.search(str(args["query"]), kind=kind, exclude_ids=excluded)
             if kind == "video":
-                history = {row["video_id"]: row for row in self.store.video_history(
+                history = {row["video_id"]: row for row in self.store.video_selection_history(
                     live.learner_id, video_ids=[str(v["video_id"]) for v in candidates],
                     limit=len(candidates),
                 )}
@@ -558,8 +561,10 @@ class Runtime:
                         "a watched video unless the child specifically requests it."}
             return {"candidates": candidates}
         if name == "get_video_history":
-            return {"videos": self.store.video_history(live.learner_id, query=str(args.get("query") or "")),
-                    "definition": "Watched at least 50% of the video; songs are separate."}
+            return {"videos": self.store.video_selection_history(
+                        live.learner_id, query=str(args.get("query") or "")),
+                    "definition": "Selections include videos stopped before halfway. Only watch_count counts "
+                                  "viewings reaching 50%. Songs are separate."}
         if name == "set_tutor_name":
             from schoolbookd.providers.openai_realtime import normalize_tutor_name
 
@@ -579,10 +584,10 @@ class Runtime:
     def _requested_replay(self, live: LiveState, video_id: str, quote: object) -> bool:
         if not isinstance(quote, str):
             return False
-        history = self.store.video_history(live.learner_id, video_ids=[video_id], limit=1)
+        history = self.store.video_selection_history(live.learner_id, video_ids=[video_id], limit=1)
         if not history:
             return False
-        recent = self.store.video_history(live.learner_id, limit=1)
+        recent = self.store.video_selection_history(live.learner_id, limit=1)
         last_video_id = live.last_video_id or recent[0]["video_id"]
         return specific_video_request(quote, live.child_request, str(history[0]["title"]),
                                       latest=last_video_id == video_id, tutor_question=live.tutor_question)

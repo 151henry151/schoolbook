@@ -31,6 +31,7 @@ from schoolbookd.db.models import (
     ToolCall,
     Turn,
     Video,
+    VideoSelection,
     VideoWatch,
 )
 from schoolbookd.learner.memory import ProfileInput, mention_interest, next_stretch
@@ -475,6 +476,54 @@ class Store:
                 db.add(VideoWatch(id=_id(), learner_id=learner_id, video_id=video_id))
                 db.commit()
 
+    def record_video_selection(self, learner_id: str, video_id: str) -> None:
+        with self.session() as db:
+            if db.get(Video, video_id) is not None:
+                db.add(VideoSelection(id=_id(), learner_id=learner_id, video_id=video_id))
+                db.commit()
+
+    def selected_video_ids(self, learner_id: str) -> set[str]:
+        """All selections and legacy half-watched videos, regardless of history page size."""
+        with self.session() as db:
+            selected = set(db.scalars(select(VideoSelection.video_id).where(
+                VideoSelection.learner_id == learner_id,
+            ).distinct()))
+        return selected | self.watched_video_ids(learner_id)
+
+    def video_selection_history(
+        self, learner_id: str, *, query: str = "", video_ids: list[str] | None = None,
+        limit: int = 30,
+    ) -> list[dict[str, object]]:
+        """Include quick dismissals, while keeping watch counts tied to the 50% milestone."""
+        from sqlalchemy import func, or_
+
+        with self.session() as db:
+            watched = (select(VideoWatch.video_id, func.count().label("count"),
+                              func.max(VideoWatch.watched_at).label("stamp"))
+                       .where(VideoWatch.learner_id == learner_id)
+                       .group_by(VideoWatch.video_id).subquery())
+            selected = (select(VideoSelection.video_id, func.count().label("count"),
+                               func.max(VideoSelection.selected_at).label("stamp"))
+                        .where(VideoSelection.learner_id == learner_id)
+                        .group_by(VideoSelection.video_id).subquery())
+            recent = func.max(func.coalesce(selected.c.stamp, watched.c.stamp),
+                              func.coalesce(watched.c.stamp, selected.c.stamp))
+            stmt = (select(Video.id, Video.title, watched.c.count, watched.c.stamp,
+                           selected.c.count, selected.c.stamp)
+                    .outerjoin(watched, watched.c.video_id == Video.id)
+                    .outerjoin(selected, selected.c.video_id == Video.id)
+                    .where(or_(watched.c.video_id.is_not(None), selected.c.video_id.is_not(None)))
+                    .order_by(recent.desc(), Video.id))
+            if video_ids is not None:
+                stmt = stmt.where(Video.id.in_(video_ids))
+            if query.strip():
+                stmt = stmt.where(Video.title.icontains(query.strip(), autoescape=True))
+            return [{"video_id": vid, "title": title, "watch_count": wc or 0,
+                     "last_watched_at": ws.replace(tzinfo=UTC).isoformat() if ws else None,
+                     "selection_count": sc or 0,
+                     "last_selected_at": ss.replace(tzinfo=UTC).isoformat() if ss else None}
+                    for vid, title, wc, ws, sc, ss in db.execute(stmt.limit(limit))]
+
     def video_history(
         self, learner_id: str, *, video_ids: list[str] | None = None, limit: int = 30,
         query: str = "",
@@ -659,7 +708,8 @@ class Store:
                         db.delete(call)
                     db.delete(turn)
                 db.delete(session_row)
-            for model in (Observation, Interest, Note, SkillState, ContentRequest, ApiUsage):
+            for model in (Observation, Interest, Note, SkillState, ContentRequest, ApiUsage,
+                          VideoSelection, VideoWatch, SongPlay):
                 column = model.learner_id
                 for row in db.scalars(select(model).where(column == learner_id)):
                     db.delete(row)
