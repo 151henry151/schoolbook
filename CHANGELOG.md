@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.15.0] - 2026-10-21
+
+### Added
+
+- Add a child-friendly CF-30 boot picker with two large illustrated choices: Schoolbook (Trixie) and Computer (Jessie/Skolelinux). Arrow keys and Enter select an OS; the menu waits indefinitely. Preserve the native boot commands and kernel-update generators, with backup and restore tooling.
+
 ## [0.14.1] - 2026-10-19
 
 ### Fixed

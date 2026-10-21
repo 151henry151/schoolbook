@@ -1,6 +1,6 @@
 [project]
 name = "schoolbook-session"
-version = "0.14.1"
+version = "0.15.0"
 description = "Schoolbook kiosk session agent"
 requires-python = ">=3.12"
 license = "GPL-3.0-or-later"

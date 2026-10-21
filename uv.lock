@@ -1494,7 +1494,7 @@ wheels = [
 
 [[package]]
 name = "schoolbook"
-version = "0.14.1"
+version = "0.15.0"
 source = { virtual = "." }
 dependencies = [
     { name = "schoolbook-protocol" },
@@ -1540,7 +1540,7 @@ requires-dist = [{ name = "pydantic", specifier = ">=2.10" }]
 
 [[package]]
 name = "schoolbook-session"
-version = "0.14.1"
+version = "0.15.0"
 source = { editable = "session" }
 dependencies = [
     { name = "pydantic" },
@@ -1555,7 +1555,7 @@ requires-dist = [
 
 [[package]]
 name = "schoolbookd"
-version = "0.14.1"
+version = "0.15.0"
 source = { editable = "daemon" }
 dependencies = [
     { name = "alembic" },

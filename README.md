@@ -2,7 +2,7 @@
 
 Schoolbook is a locked-down Linux learning environment for children sharing a laptop. The machine boots into a kiosk. The child talks with a tutor, sees a full-screen board, watches vetted videos, and can open a short list of educational apps. A parent console on a separate port shows what happened.
 
-Version 0.14.1 prevents repeats even after early dismissal and preserves the requested video subject in the software described in [docs/design-spec.md](docs/design-spec.md). Version 1.0.0 waits for a real pilot with a parent nearby. `schoolbook` starts a cage kiosk for the current session. It does not replace the machine's login manager; `packaging/install.sh` is the path that boots straight into Schoolbook.
+Version 0.15.0 adds an illustrated, two-choice CF-30 boot picker to the software described in [docs/design-spec.md](docs/design-spec.md). Version 1.0.0 waits for a real pilot with a parent nearby. `schoolbook` starts a cage kiosk for the current session. It does not replace the machine's login manager; `packaging/install.sh` is the path that boots straight into Schoolbook.
 
 ## Layout
 
@@ -58,6 +58,24 @@ Hannah uses the **age-4** profile: short, concrete explanations, one idea at a t
 In the parent console, **Viewing learner** selects whose records and profile you are viewing or editing; it does not switch the child on the laptop. Content blocks, app settings, tutor name, volume, and billing remain shared. Session controls act on the child currently using the laptop and are disabled when viewing another learner.
 
 `profiles/learners.yaml` seeds additional learners once without overwriting parent edits. Hannah’s birth year is initially approximated as 2022 from her stated age; the explicit `age-4` teaching profile controls behavior, independently of birth year. Profile guidance lives in `profiles/age-4.yaml` and `profiles/age-6.yaml`.
+
+## CF-30 boot picker
+
+The CF-30 now has a large illustrated boot menu with just **Schoolbook** (Trixie and the tutor) and **Computer** (Jessie / Skolelinux / Debian EDU). Use **↑ / ↓**, then **Enter**. The menu appears automatically, stays on screen indefinitely, and does not require F6. This BIOS GRUB picker uses the keyboard; it does not support mouse clicks. The picker is included in version 0.15.0.
+
+`packaging/grub/install-picker.py` installs the picker as root on the inspected BIOS setup without rebooting, changing partitions, or reinstalling GRUB in the disk's boot sector. It requires the already installed Debian GRUB tools, Python 3, os-prober, and DejaVu fonts. Supply the existing native menuentry IDs from `/boot/grub/grub.cfg`:
+
+```sh
+sudo python3 packaging/grub/install-picker.py \
+  --schoolbook-id gnulinux-simple-c53e67f3-66e5-4149-9695-e61e81950d56 \
+  --computer-id osprober-gnulinux-simple-c0439dd6-ef12-4d88-bab3-ce5d1c391766
+```
+
+Those IDs belong to this CF-30; do not reuse them on another disk. The installer backs up the current configuration under `/var/backups/schoolbook-boot-TIMESTAMP/`, verifies both native entries, validates a newly generated menu before publishing it, and supplies `restore.sh` in that backup directory. Run that script as root to restore the previous menu without rebooting. An installation error restores the prior generators automatically. A second installation refuses to overwrite the existing setup; restore first before reinstalling.
+
+Package-managed `10_linux` and `30_os-prober` generators are retained through local `dpkg-divert` rules, so kernel and GRUB updates still generate native boot commands. Small wrappers retain only the designated primary entry from each, preserving kernel arguments and Jessie’s separate boot partition. A final generator enforces no timeout even after a failed boot. Recovery/advanced entries are hidden from the child menu; the backed-up full menu remains available for maintenance. `update-grub` continues to work; if the expected OS is missing, generation fails rather than silently substituting another OS.
+
+The theme uses bundled original PNG artwork; `python3 packaging/grub/build-picker-art.py` regenerates it with Pillow on a development machine. Fonts are generated on the target from its installed DejaVu fonts. For GRUB theme and waiting behavior, see the [GNU GRUB manual](https://www.gnu.org/software/grub/manual/grub/grub.html). The older `packaging/kiosk-boot.sh` script also changes networking and is not needed to install this picker.
 
 ## CF-30 kiosk controls
 
