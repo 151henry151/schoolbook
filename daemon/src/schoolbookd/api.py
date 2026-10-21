@@ -1,0 +1,1130 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# SPDX-FileCopyrightText: 2026 Schoolbook contributors
+
+"""Child WebSocket and parent console HTTP API."""
+
+from __future__ import annotations
+
+import asyncio
+import base64
+import hashlib
+import hmac
+import json
+import sys
+import time
+from collections.abc import Awaitable, Callable
+from dataclasses import dataclass, field
+from datetime import UTC, datetime
+from pathlib import Path
+
+from fastapi import FastAPI, HTTPException, Request, WebSocket, WebSocketDisconnect
+from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
+from sqlalchemy import select
+from starlette.responses import Response as StarletteResponse
+
+from schoolbook_protocol.messages import parse_client_message
+from schoolbook_protocol.version import MAJOR
+from schoolbookd.backup import restic_backup_command
+from schoolbookd.battery import battery_status
+from schoolbookd.db.models import (
+    ContentRequest,
+    Flag,
+    ImageRow,
+    Interest,
+    Note,
+    Observation,
+    SessionRow,
+    Skill,
+    SkillState,
+    ToolCall,
+    Turn,
+    Video,
+)
+from schoolbookd.net.wifi import Wifi, WifiError
+from schoolbookd.policy.unlock import UnlockState, attempt_unlock, hash_password
+from schoolbookd.providers.base import STTProvider
+from schoolbookd.providers.openai_realtime import (
+    DEFAULT_TUTOR_NAME,
+    REALTIME_TOOLS,
+    RealtimeMapper,
+    RealtimeTalk,
+    finished_video_note,
+    paused_video_note,
+    preferred_tutor_voice,
+    spoken_child_instructions,
+)
+from schoolbookd.runtime import LiveState, Runtime
+from schoolbookd.secrets_file import upsert_secrets
+from schoolbookd.tutor.loop import TurnOutcome
+from schoolbookd.voice.pipeline import (
+    ListenBuffer,
+    append_pcm,
+    encode_audio,
+    sentence_audio,
+    transcribe_buffer,
+)
+from schoolbookd.voice.realtime import RealtimeSession
+
+LOCALHOSTS = {"127.0.0.1", "::1", "testclient", "localhost"}
+
+
+def _sign(secret: str, expires: float) -> str:
+    payload = base64.urlsafe_b64encode(json.dumps({"exp": expires}).encode()).decode()
+    digest = hmac.new(secret.encode(), payload.encode(), hashlib.sha256).hexdigest()
+    return f"{payload}.{digest}"
+
+
+def _valid(secret: str, token: str, now: float) -> bool:
+    payload, _, digest = token.partition(".")
+    expected = hmac.new(secret.encode(), payload.encode(), hashlib.sha256).hexdigest()
+    if not hmac.compare_digest(expected, digest):
+        return False
+    try:
+        data = json.loads(base64.urlsafe_b64decode(payload.encode()))
+    except (ValueError, json.JSONDecodeError):
+        return False
+    return float(data.get("exp", 0)) > now
+
+
+@dataclass
+class Host:
+    runtime: Runtime
+    learner_id: str
+    token: str
+    password_hash: str
+    session_secret: str
+    dev_text: bool = False
+    lan_enabled: bool = False
+    unlock: UnlockState = field(default_factory=UnlockState)
+    attempts: list[float] = field(default_factory=list)
+    live: LiveState | None = None
+    stt: STTProvider | None = None
+    buffers: dict[str, ListenBuffer] = field(default_factory=dict)
+    cancelled_turns: set[str] = field(default_factory=set)
+    speaking_turn: str | None = None
+    parent_seen_at: float = 0.0
+    parent_locked: bool = False
+    idle_lock_s: float = 300
+    secrets_path: Path | None = None
+    backup_repository: str | None = None
+    data_dir: Path | None = None
+    voice: str = "pipeline"
+    openai_api_key: str = ""
+    picture_emit: Callable[[dict[str, object]], Awaitable[None]] | None = None
+    picture_talk: RealtimeTalk | None = None
+    picture_tasks: set[asyncio.Task[None]] = field(default_factory=set)
+    learner_generation: int = 0
+    speech_generation: int = 0
+    song_audio: Callable[[str], tuple[bytes, str]] | None = None
+    wifi: Wifi | None = None
+
+    def request_kiosk_end(self) -> None:
+        if self.data_dir is None:
+            return
+        self.data_dir.mkdir(parents=True, exist_ok=True)
+        (self.data_dir / "kiosk.end").write_text("end\n", encoding="utf-8")
+
+    def ensure_live(self) -> LiveState:
+        if (self.live is None or self.live.learner_id != self.learner_id
+                or self.runtime.store.open_session(self.learner_id) is None):
+            session_id = self.runtime.store.start_session(self.learner_id, self.runtime.model)
+            self.live = LiveState(session_id=session_id, learner_id=self.learner_id)
+        assert self.live is not None
+        return self.live
+
+    def learner_options(self) -> list[dict[str, str]]:
+        return [{"id": row.id, "first_name": row.first_name, "avatar": row.avatar}
+                for row in self.runtime.store.learners()]
+
+    def select_learner(self, learner_id: str) -> bool:
+        if self.runtime.store.learner(learner_id) is None:
+            return False
+        self.cancel_speech_work()
+        self.learner_generation += 1
+        self.cancelled_turns.update(self.buffers)
+        self.buffers.clear()
+        if self.speaking_turn:
+            self.cancelled_turns.add(self.speaking_turn)
+            self.speaking_turn = None
+        if self.live is not None:
+            self.runtime.stop_app(self.live, notify=False)
+            self.live.song_queue.clear()
+            self.live.playing_video = None
+            self.runtime.store.end_session(self.live.session_id, "learner changed", "", "")
+        self.live = None
+        self.learner_id = learner_id
+        self.runtime.store.put_setting("active_learner", learner_id, actor="system")
+        return True
+
+    def login(self, password: str, now: float) -> tuple[bool, str]:
+        recent = [stamp for stamp in self.attempts if now - stamp < 300]
+        self.attempts = recent
+        if len(recent) >= 10:
+            return False, "rate limited"
+        self.attempts.append(now)
+        ok, self.unlock = attempt_unlock(password, self.password_hash, self.unlock, _as_datetime(now))
+        if not ok:
+            return False, "locked" if self.unlock.locked_until else "invalid password"
+        self.parent_seen_at = now
+        self.parent_locked = False
+        return True, _sign(self.session_secret, now + 3600)
+
+    def begin_talk(self, turn_id: str) -> None:
+        if self.speaking_turn:
+            self.cancelled_turns.add(self.speaking_turn)
+            self.speaking_turn = None
+        self.buffers[turn_id] = ListenBuffer()
+
+    def add_audio(self, turn_id: str, pcm_b64: str) -> None:
+        buffer = self.buffers.setdefault(turn_id, ListenBuffer())
+        append_pcm(buffer, pcm_b64)
+
+    def finish_talk(self, turn_id: str, live: LiveState | None = None) -> list[dict[str, object]]:
+        live = live or self.ensure_live()
+        generation = self.learner_generation
+        buffer = self.buffers.pop(turn_id, ListenBuffer())
+        if turn_id in self.cancelled_turns:
+            return []
+        learner = self.runtime.store.learner(live.learner_id)
+        hints = [learner.first_name] if learner else []
+        if self.stt is None:
+            text = ""
+        else:
+            text, _confidence = transcribe_buffer(self.stt, buffer, hints)
+        if generation != self.learner_generation:
+            return []
+        outcome = self.runtime.child_turn(live, text)
+        if turn_id in self.cancelled_turns:
+            return [{"type": "state", "name": "listening", "detail": "interrupted"}]
+        self.speaking_turn = turn_id
+        messages = _ws_messages(outcome, turn_id)
+        if text.strip():
+            messages.insert(
+                0,
+                {"type": "transcript", "turn_id": turn_id, "role": "child", "text": text, "partial": False},
+            )
+        if outcome.sentences == ["The tutor is resting."]:
+            messages.insert(0, {"type": "state", "name": "offline", "detail": "apps"})
+        rate = int(getattr(self.runtime.tts, "sample_rate", 16000))
+        for seq, pcm in enumerate(sentence_audio(self.runtime.tts, outcome.sentences)):
+            if turn_id in self.cancelled_turns:
+                break
+            messages.append(
+                {
+                    "type": "audio_chunk",
+                    "turn_id": turn_id,
+                    "seq": seq,
+                    "pcm_b64": encode_audio(pcm),
+                    "sample_rate": rate,
+                }
+            )
+        self.speaking_turn = None
+        messages.append({"type": "state", "name": "listening", "detail": ""})
+        return messages
+
+    def make_realtime(self) -> RealtimeTalk:
+        from schoolbookd.tutor.prompts import render_age_profile
+
+        learner = self.runtime.store.learner(self.learner_id)
+        name = learner.first_name if learner else "friend"
+        voice = preferred_tutor_voice(self.runtime.store)
+        stored_name = self.runtime.store.get_setting("tutor_name", DEFAULT_TUTOR_NAME)
+        if isinstance(stored_name, str) and stored_name.strip():
+            tutor_name = stored_name
+        else:
+            tutor_name = DEFAULT_TUTOR_NAME
+        profile = self.runtime.profile_for(self.learner_id)
+        instructions = spoken_child_instructions(
+            self.runtime.core_prompt,
+            render_age_profile(profile),
+            name,
+            tutor_name=tutor_name,
+            age_years=profile.age_years,
+        )
+
+        loop = asyncio.get_running_loop()
+        generation = self.speech_generation
+
+        def execute(tool: str, args: dict[str, object]) -> dict[str, object]:
+            if generation != self.speech_generation:
+                return {"cancelled": True}
+            live = self.ensure_live()
+            turn_id = live.child_turn_id
+            result = self.runtime.run_tool(live, tool, args, defer_pictures=True)
+            if turn_id:
+                self.runtime.store.add_tool_call(
+                    turn_id, tool, args, result, allowed="error" not in result,
+                )
+            if result.get("loading") and result.get("image_id"):
+                brief = str(result.get("brief") or result.get("topic") or "")
+                kind = str(result.get("kind") or "diagram")
+                task = loop.create_task(self.complete_picture(brief, str(result["image_id"]), kind))
+                self.picture_tasks.add(task)
+                task.add_done_callback(self.picture_tasks.discard)
+            return result
+
+        usage_learner_id = self.learner_id
+
+        def record_usage(kind: str, event_id: str, model: str, usage: object) -> None:
+            self.runtime.store.record_api_usage(usage_learner_id, kind, event_id, model, usage)
+
+        talk = RealtimeTalk(
+            api_key=self.openai_api_key,
+            instructions=instructions,
+            execute=execute,
+            tools=[{**tool, "description": "Search educational videos. " + profile.video_guidance}
+                   if tool.get("name") == "search_videos" else dict(tool) for tool in REALTIME_TOOLS],
+            mapper=RealtimeMapper(child_name=name, age_years=profile.age_years,
+                                  video_guidance=profile.video_guidance),
+            voice=voice,
+            tutor_name=tutor_name,
+            on_usage=record_usage,
+        )
+        self.picture_talk = talk
+        return talk
+
+    def cancel_speech_work(self) -> None:
+        self.speech_generation += 1
+        self.picture_talk = None
+        for task in self.picture_tasks:
+            task.cancel()
+
+    async def complete_picture(self, topic: str, image_id: str, kind: str = "diagram") -> None:
+        generation = self.speech_generation
+        try:
+            done = await asyncio.to_thread(
+                self.runtime.finish_picture,
+                self.ensure_live(),
+                topic,
+                image_id,
+                kind=kind,
+            )
+        except Exception as exc:
+            print(f"schoolbook: picture failed ({exc})", file=sys.stderr)
+            emit = self.picture_emit
+            if emit is not None:
+                await emit({"type": "picture", "image_id": image_id, "loading": False, "error": True})
+            return
+        if generation != self.speech_generation:
+            return
+        talk = self.picture_talk
+        if talk is not None:
+            await talk.picture_ready()
+        emit = self.picture_emit
+        if emit is not None and done.get("image_id"):
+            await emit({"type": "picture", "image_id": str(done["image_id"]), "loading": False})
+
+    def note_transcript(self, role: str, text: str) -> None:
+        if not text.strip():
+            return
+        live = self.ensure_live()
+        if role == "child":
+            live.child_request = text
+        elif role == "tutor":
+            live.tutor_question = text
+        turn_id = self.runtime.store.add_turn(live.session_id, role, text)
+        if role == "child":
+            live.child_turn_id = turn_id
+
+
+def _as_datetime(stamp: float) -> datetime:
+    return datetime.fromtimestamp(stamp, UTC)
+
+
+def _local_only(request: Request) -> bool:
+    host = request.client.host if request.client else ""
+    return host in LOCALHOSTS
+
+
+def child_app(host: Host) -> FastAPI:
+    app = FastAPI(title="Schoolbook child")
+
+    @app.middleware("http")
+    async def localhost(
+        request: Request, call_next: Callable[[Request], Awaitable[StarletteResponse]]
+    ) -> StarletteResponse:
+        if not _local_only(request):
+            return JSONResponse({"error": "child UI is local only"}, status_code=403)
+        return await call_next(request)
+
+    @app.get("/health")
+    def health() -> dict[str, str]:
+        return {"status": "ok"}
+
+    @app.get("/battery")
+    def battery() -> JSONResponse:
+        return JSONResponse(battery_status(), headers={"Cache-Control": "no-store"})
+
+    def _wifi() -> Wifi:
+        return host.wifi if host.wifi is not None else Wifi()
+
+    def _wifi_payload(wifi: Wifi) -> dict[str, object]:
+        status = wifi.status()
+        return {
+            "connected": status.connected,
+            "ssid": status.ssid,
+            "online": status.online,
+            "networks": [
+                {"ssid": net.ssid, "signal": net.signal, "secured": net.secured}
+                for net in wifi.networks()
+            ],
+        }
+
+    @app.get("/wifi")
+    def wifi_status() -> JSONResponse:
+        try:
+            return JSONResponse(_wifi_payload(_wifi()))
+        except WifiError as exc:
+            return JSONResponse(
+                {
+                    "error": str(exc),
+                    "connected": False,
+                    "ssid": None,
+                    "online": False,
+                    "networks": [],
+                },
+                status_code=503,
+            )
+
+    @app.post("/wifi/connect")
+    def wifi_connect(body: dict[str, str], request: Request) -> JSONResponse:
+        if request.headers.get("x-schoolbook-token") != host.token:
+            return JSONResponse({"error": "bad token"}, status_code=401)
+        wifi = _wifi()
+        try:
+            wifi.connect(str(body.get("ssid", "")), str(body.get("password", "")))
+            payload = _wifi_payload(wifi)
+        except WifiError as exc:
+            return JSONResponse({"error": str(exc)}, status_code=400)
+        payload["ok"] = True
+        return JSONResponse(payload)
+
+    @app.get("/token")
+    def token() -> dict[str, str]:
+        return {"token": host.token, "protocol_major": str(MAJOR)}
+
+    @app.get("/songs/{video_id}")
+    def song(video_id: str) -> StarletteResponse:
+        import httpx
+
+        from schoolbookd.content.audio import AUDIO_HEADERS, resolve_audio_url, song_src
+
+        try:
+            song_src(video_id)
+        except ValueError:
+            return JSONResponse({"error": "bad id"}, status_code=400)
+        if host.song_audio is not None:
+            try:
+                body, media = host.song_audio(video_id)
+            except (FileNotFoundError, RuntimeError, OSError, ValueError):
+                return JSONResponse({"error": "missing"}, status_code=404)
+            return StarletteResponse(content=body, media_type=media)
+        try:
+            url = resolve_audio_url(video_id)
+        except (RuntimeError, ValueError):
+            return JSONResponse({"error": "missing"}, status_code=404)
+
+        def chunks() -> object:
+            with httpx.stream("GET", url, headers=AUDIO_HEADERS, follow_redirects=True, timeout=60) as resp:
+                resp.raise_for_status()
+                yield from resp.iter_bytes(65536)
+
+        return StreamingResponse(chunks(), media_type="audio/mp4")
+
+    @app.get("/pictures/{image_id}")
+    def picture(image_id: str) -> StarletteResponse:
+        path = host.runtime.image_path(image_id)
+        if path is None:
+            return JSONResponse({"error": "missing"}, status_code=404)
+        return FileResponse(path)
+
+    @app.post("/dev/turn")
+    def dev_turn(body: dict[str, str], request: Request) -> JSONResponse:
+        if not host.dev_text:
+            return JSONResponse({"error": "dev text is off"}, status_code=404)
+        if request.headers.get("x-schoolbook-token") != host.token:
+            return JSONResponse({"error": "bad token"}, status_code=401)
+        outcome = host.runtime.child_turn(host.ensure_live(), body.get("text", ""))
+        return JSONResponse(_outcome_payload(outcome))
+
+    @app.post("/unlock")
+    def unlock(body: dict[str, str], request: Request) -> JSONResponse:
+        if request.headers.get("x-schoolbook-token") != host.token:
+            return JSONResponse({"error": "bad token"}, status_code=401)
+        ok, _detail = host.login(body.get("password", ""), time.time())
+        if not ok:
+            return JSONResponse({"error": _detail}, status_code=401)
+        ended = body.get("action") == "end"
+        if ended:
+            host.request_kiosk_end()
+        return JSONResponse(
+            {"ok": True, "menu": ["console", "pause", "end", "logout", "shutdown"], "ended": ended}
+        )
+
+    @app.websocket("/ws")
+    async def ws(socket: WebSocket) -> None:
+        if socket.client and socket.client.host not in LOCALHOSTS:
+            await socket.close(code=4403)
+            return
+        await socket.accept()
+        raw = await socket.receive_json()
+        try:
+            hello = parse_client_message(raw)
+        except Exception:
+            await socket.send_json({"type": "error", "message": "bad hello"})
+            await socket.close()
+            return
+        if hello.type != "hello" or hello.token != host.token or hello.protocol_major != MAJOR:
+            await socket.send_json({"type": "error", "message": "unauthorized"})
+            await socket.close()
+            return
+        learner = host.runtime.store.learner(host.learner_id)
+        name = learner.first_name if learner else ""
+        talk_mode = learner.talk_mode if learner else "handsfree"
+        await socket.send_json(
+            {
+                "type": "hello_ok",
+                "protocol_major": MAJOR,
+                "learner_name": name,
+                "learner_id": host.learner_id,
+                "learners": host.learner_options(),
+                "talk_mode": talk_mode,
+                "voice": host.voice,
+            }
+        )
+        learner_generation = host.learner_generation
+        speech: RealtimeSession | None = None
+        async def emit(message: dict[str, object]) -> None:
+            if learner_generation != host.learner_generation:
+                return
+            if speech is not None and message.get("type") == "video":
+                action = message.get("action")
+                if action in {"play", "resume"}:
+                    speech.set_media_playing(True)
+                elif action in {"stop", "destroy", "pause"}:
+                    speech.set_media_playing(False)
+            if speech is not None and message.get("type") == "launch":
+                speech.set_media_playing(True)
+            if message.get("type") == "transcript" and not message.get("partial"):
+                host.note_transcript(str(message.get("role", "tutor")), str(message.get("text", "")))
+            await socket.send_json(message)
+
+        if host.voice == "realtime" and host.openai_api_key:
+            speech = RealtimeSession(host.make_realtime, emit, host.cancel_speech_work)
+
+            async def emit_picture(message: dict[str, object]) -> None:
+                if speech is not None:
+                    await emit({**message, "attempt_id": speech.attempt_id})
+
+            host.picture_emit = emit_picture
+        loop = asyncio.get_running_loop()
+
+        def app_exited() -> None:
+            async def notify() -> None:
+                if learner_generation != host.learner_generation:
+                    return
+                await socket.send_json({"type": "app", "action": "stop"})
+                if speech is not None:
+                    speech.set_media_playing(False)
+                    speech.reset(speech.attempt_id)
+
+            loop.call_soon_threadsafe(lambda: asyncio.create_task(notify()))
+
+        host.runtime.on_app_exit = app_exited
+
+        async def watch_app() -> None:
+            while True:
+                await asyncio.sleep(0.5)
+                if host.live is not None and learner_generation == host.learner_generation:
+                    host.runtime.check_app_exit(host.live)
+
+        app_watcher = asyncio.create_task(watch_app())
+        try:
+            while True:
+                try:
+                    incoming = parse_client_message(await socket.receive_json())
+                except WebSocketDisconnect:
+                    break
+                if learner_generation != host.learner_generation:
+                    await socket.close(code=4409)
+                    break
+                if incoming.type == "select_learner":
+                    if host.runtime.store.learner(incoming.learner_id) is None:
+                        await socket.send_json({"type": "error", "message": "Unknown learner.",
+                                                "attempt_id": incoming.turn_id})
+                        continue
+                    if speech is not None:
+                        speech.reset(incoming.turn_id, listen=False)
+                        speech.set_media_playing(False)
+                    host.select_learner(incoming.learner_id)
+                    learner_generation = host.learner_generation
+                    selected = host.runtime.store.learner(host.learner_id)
+                    await socket.send_json({"type": "learner_selected", "learner_id": host.learner_id,
+                                            "learner_name": selected.first_name if selected else "friend",
+                                            "attempt_id": incoming.turn_id})
+                elif incoming.type == "ping":
+                    await socket.send_json({"type": "pong"})
+                elif incoming.type == "dev_text" and host.dev_text:
+                    outcome = host.runtime.child_turn(host.ensure_live(), incoming.text)
+                    for message in _ws_messages(outcome, incoming.turn_id):
+                        await socket.send_json(message)
+                elif incoming.type == "talk_start":
+                    if speech is not None:
+                        speech.reset(incoming.turn_id)
+                    elif host.voice != "realtime":
+                        host.begin_talk(incoming.turn_id)
+                        await socket.send_json({"type": "state", "name": "listening", "detail": ""})
+                elif incoming.type == "talk_stop":
+                    if speech is not None:
+                        speech.reset(incoming.turn_id, listen=False)
+                    host.cancelled_turns.update(host.buffers)
+                    host.buffers.clear()
+                    if host.speaking_turn:
+                        host.cancelled_turns.add(host.speaking_turn)
+                        host.speaking_turn = None
+                elif incoming.type == "audio_frame":
+                    if speech is not None:
+                        pcm = base64.b64decode(incoming.pcm_b64)
+                        speech.audio(pcm, incoming.sample_rate, incoming.turn_id)
+                    elif host.voice != "realtime":
+                        host.add_audio(incoming.turn_id, incoming.pcm_b64)
+                elif incoming.type == "talk_end":
+                    if host.voice == "realtime":
+                        continue
+                    turn_id = incoming.turn_id
+
+                    live_turn = host.ensure_live()
+                    turn_generation = host.learner_generation
+
+                    async def emit_turn(done_id: str = turn_id, live: LiveState = live_turn,
+                                        generation: int = turn_generation) -> None:
+                        messages = await asyncio.to_thread(host.finish_talk, done_id, live)
+                        for message in messages:
+                            if done_id in host.cancelled_turns or generation != host.learner_generation:
+                                break
+                            await socket.send_json(message)
+
+                    asyncio.create_task(emit_turn())
+                elif incoming.type == "choice":
+                    outcome = host.runtime.child_turn(host.ensure_live(), f"I choose {incoming.option_id}")
+                    for message in _ws_messages(outcome, incoming.turn_id):
+                        await socket.send_json(message)
+                elif incoming.type == "home":
+                    if speech is not None:
+                        speech.reset(speech.attempt_id, listen=False)
+                    host.select_learner(host.learner_id)
+                    learner_generation = host.learner_generation
+                    await socket.send_json({"type": "state", "name": "home", "detail": ""})
+                elif incoming.type == "unlock_gesture":
+                    await socket.send_json({"type": "state", "name": "parent_unlock", "detail": ""})
+                elif incoming.type == "app_ui":
+                    host.runtime.stop_app(host.ensure_live(), notify=False)
+                    await socket.send_json({"type": "app", "action": "stop"})
+                    if speech is not None:
+                        speech.set_media_playing(False)
+                        speech.reset(speech.attempt_id)
+                elif incoming.type == "video_ui":
+                    live = host.ensure_live()
+                    if incoming.video_id and incoming.video_id != live.playing_video:
+                        continue
+                    if incoming.action == "watched":
+                        host.runtime.video_watched(
+                            live, incoming.video_id, incoming.watched_s, incoming.duration_s,
+                        )
+                        continue
+                    if incoming.action == "playing":
+                        host.runtime.song_started(live, incoming.video_id)
+                        continue
+                    if incoming.action == "ended":
+                        next_song = host.runtime.next_song(live)
+                        if next_song is not None:
+                            await emit({"type": "video", "action": "play",
+                                        "video_id": next_song["playing"], "audio_only": True,
+                                        "start_s": None, "end_s": None, "at_s": None})
+                            continue
+                    if incoming.action in {"done", "ended"}:
+                        live.song_queue.clear()
+                        live.playing_video = None
+                        live.screen = "home"
+                    if speech is not None:
+                        speech.set_media_playing(incoming.action == "resume")
+                        if incoming.action == "pause":
+                            speech.note(paused_video_note())
+                        if incoming.action == "ended":
+                            speech.note(finished_video_note(), speak=True)
+                    await socket.send_json(
+                        {
+                            "type": "video",
+                            "action": "stop" if incoming.action in {"done", "ended"} else incoming.action,
+                            "video_id": "",
+                            "start_s": None,
+                            "end_s": None,
+                            "at_s": None,
+                        }
+                    )
+        finally:
+            app_watcher.cancel()
+            await asyncio.gather(app_watcher, return_exceptions=True)
+            if host.runtime.on_app_exit is app_exited:
+                host.runtime.on_app_exit = None
+                host.picture_talk = None
+                host.picture_emit = None
+            if speech is not None:
+                if learner_generation != host.learner_generation:
+                    speech.invalidate = lambda: None
+                await speech.close()
+
+    return app
+
+
+def console_app(host: Host) -> FastAPI:
+    app = FastAPI(title="Schoolbook console")
+
+    def authorized(request: Request) -> bool:
+        if not host.lan_enabled and not _local_only(request):
+            return False
+        cookie = request.cookies.get("schoolbook_session", "")
+        now = time.time()
+        if host.parent_locked:
+            return False
+        if not _valid(host.session_secret, cookie, now):
+            return False
+        if host.parent_seen_at and now - host.parent_seen_at > host.idle_lock_s:
+            host.parent_locked = True
+            return False
+        host.parent_seen_at = now
+        return True
+
+    @app.middleware("http")
+    async def guard(
+        request: Request, call_next: Callable[[Request], Awaitable[StarletteResponse]]
+    ) -> StarletteResponse:
+        if request.url.path == "/api/login" or not request.url.path.startswith("/api/"):
+            return await call_next(request)
+        if not authorized(request):
+            return JSONResponse({"error": "unauthorized"}, status_code=401)
+        return await call_next(request)
+
+    @app.post("/api/login")
+    def login(body: dict[str, str]) -> JSONResponse:
+        ok, detail = host.login(body.get("password", ""), time.time())
+        if not ok:
+            return JSONResponse({"error": detail}, status_code=401)
+        payload = JSONResponse({"ok": True})
+        payload.set_cookie("schoolbook_session", detail, httponly=True, samesite="strict")
+        return payload
+
+    def selected_id(learner_id: str = "") -> str:
+        selected = learner_id or host.learner_id
+        if host.runtime.store.learner(selected) is None:
+            raise HTTPException(404, "Unknown learner")
+        return selected
+
+    @app.get("/api/learners")
+    def learners() -> dict[str, object]:
+        return {"active_learner_id": host.learner_id, "learners": host.learner_options()}
+
+    @app.get("/api/today")
+    def today(learner_id: str = "") -> dict[str, object]:
+        learner_id = selected_id(learner_id)
+        live = host.live if host.live and host.live.learner_id == learner_id else None
+        flags = _flags(host, learner_id)
+        latest = _sessions(host, learner_id)
+        minutes = 0.0
+        if latest:
+            started = latest[-1].started_at
+            if started.tzinfo is None:
+                started = started.replace(tzinfo=UTC)
+            if latest[-1].ended_at is None:
+                minutes = (datetime.now(UTC) - started).total_seconds() / 60
+        calls = host.runtime.store.get_setting("model_calls", 0)
+        alert = host.runtime.store.get_setting("spend_alert_cents", 0)
+        return {
+            "in_session": live is not None,
+            "paused": bool(live and live.paused),
+            "screen": live.screen if live else "idle",
+            "minutes": round(minutes, 1),
+            "open_flags": [
+                {"id": row.id, "reason": row.reason, "severity": row.severity, "excerpt": row.excerpt}
+                for row in flags
+                if row.resolved_at is None
+            ][:5],
+            "latest_summary": latest[-1].parent_summary if latest else "",
+            "model_calls": calls if isinstance(calls, int) else 0,
+            "spend_alert_cents": alert if isinstance(alert, int) else 0,
+        }
+
+    @app.get("/api/sessions")
+    def sessions(learner_id: str = "") -> list[dict[str, object]]:
+        learner_id = selected_id(learner_id)
+        rows = _sessions(host, learner_id)
+        return [
+            {"id": row.id, "started_at": row.started_at.isoformat(), "summary": row.parent_summary}
+            for row in rows
+        ]
+
+    @app.get("/api/sessions/{session_id}")
+    def session_detail(session_id: str, learner_id: str = "") -> dict[str, object]:
+        learner_id = selected_id(learner_id)
+        with host.runtime.store.session() as db:
+            session = db.get(SessionRow, session_id)
+            if session is None or session.learner_id != learner_id:
+                raise HTTPException(404, "Session not found for this learner")
+            turns = list(db.scalars(select(Turn).where(Turn.session_id == session_id)))
+            calls: list[ToolCall] = []
+            for turn in turns:
+                calls.extend(db.scalars(select(ToolCall).where(ToolCall.turn_id == turn.id)))
+        return {
+            "turns": [{"role": turn.role, "text": turn.text} for turn in turns],
+            "tool_calls": [{"tool": call.tool, "allowed": bool(call.allowed)} for call in calls],
+        }
+
+    @app.get("/api/progress")
+    def progress(learner_id: str = "") -> dict[str, object]:
+        learner_id = selected_id(learner_id)
+        with host.runtime.store.session() as db:
+            skills = list(db.scalars(select(Skill)))
+            states = list(db.scalars(select(SkillState).where(SkillState.learner_id == learner_id)))
+        by_id = {row.skill_id: row.state for row in states}
+        return {
+            "skills": [
+                {"id": skill.id, "title": skill.title, "state": by_id.get(skill.id, "not_seen")}
+                for skill in skills
+            ]
+        }
+
+    @app.get("/api/memory")
+    def memory(learner_id: str = "") -> dict[str, object]:
+        learner_id = selected_id(learner_id)
+        with host.runtime.store.session() as db:
+            notes = list(db.scalars(select(Note).where(Note.learner_id == learner_id)))
+            interests = list(db.scalars(select(Interest).where(Interest.learner_id == learner_id)))
+            observations = list(
+                db.scalars(select(Observation).where(Observation.learner_id == learner_id))
+            )
+        return {
+            "notes": [{"id": note.id, "kind": note.kind, "text": note.text} for note in notes],
+            "interests": [{"topic": row.topic, "strength": row.strength} for row in interests],
+            "observations": [
+                {"id": row.id, "skill_id": row.skill_id, "outcome": row.outcome} for row in observations
+            ],
+        }
+
+    @app.post("/api/memory/forget")
+    def forget(body: dict[str, str], learner_id: str = "") -> dict[str, bool]:
+        learner_id = selected_id(learner_id)
+        host.runtime.store.forget(body["kind"], learner_id, body["target"])
+        return {"ok": True}
+
+    @app.get("/api/library/videos")
+    def videos() -> list[dict[str, object]]:
+        with host.runtime.store.session() as db:
+            rows = list(db.scalars(select(Video)))
+        return [
+            {
+                "id": row.id,
+                "title": row.title,
+                "verdict": row.verdict,
+                "reasons": row.verdict_reasons,
+                "level": row.est_level,
+                "channel_id": row.channel_id,
+            }
+            for row in rows
+        ]
+
+    @app.post("/api/library/videos/{video_id}/block")
+    def block_video(video_id: str) -> dict[str, bool]:
+        host.runtime.store.block_video(video_id)
+        return {"ok": True}
+
+    @app.post("/api/library/channels/{channel_id}/block")
+    def block_channel(channel_id: str) -> dict[str, bool]:
+        host.runtime.store.block_channel(channel_id)
+        return {"ok": True}
+
+    @app.get("/api/library/images")
+    def images() -> list[dict[str, str]]:
+        with host.runtime.store.session() as db:
+            rows = list(db.scalars(select(ImageRow)))
+        return [{"id": row.id, "title": row.title, "license": row.license} for row in rows]
+
+    @app.get("/api/requests")
+    def requests() -> list[dict[str, str]]:
+        with host.runtime.store.session() as db:
+            rows = list(db.scalars(select(ContentRequest)))
+        return [
+            {"id": row.id, "kind": row.kind, "description": row.description, "status": row.status}
+            for row in rows
+        ]
+
+    @app.get("/api/apps")
+    def apps() -> list[dict[str, object]]:
+        disabled = host.runtime.store.get_setting("disabled_apps", [])
+        disabled_ids = set(disabled) if isinstance(disabled, list) else set()
+        return [
+            {
+                "id": app_id,
+                "name": manifest.name,
+                "enabled": app_id not in disabled_ids,
+                "activities": [item.id for item in manifest.activities],
+            }
+            for app_id, manifest in host.runtime.apps.items()
+        ]
+
+    @app.post("/api/apps/{app_id}/disable")
+    def disable_app(app_id: str) -> dict[str, bool]:
+        disabled = host.runtime.store.get_setting("disabled_apps", [])
+        ids = set(disabled) if isinstance(disabled, list) else set()
+        ids.add(app_id)
+        host.runtime.store.put_setting("disabled_apps", sorted(ids))
+        return {"ok": True}
+
+    @app.post("/api/session/pause")
+    def pause() -> dict[str, bool]:
+        live = host.ensure_live()
+        live.paused = True
+        host.runtime.store.set_paused(live.session_id, True)
+        return {"ok": True}
+
+    @app.post("/api/session/end")
+    def end() -> dict[str, bool]:
+        live = host.ensure_live()
+        host.runtime.end_from_parent(live)
+        host.live = None
+        host.request_kiosk_end()
+        return {"ok": True}
+
+    @app.get("/api/learner")
+    def learner(learner_id: str = "") -> dict[str, object]:
+        learner_id = selected_id(learner_id)
+        row = host.runtime.store.learner(learner_id)
+        if row is None:
+            return {}
+        return {
+            "first_name": row.first_name,
+            "birth_year": row.birth_year,
+            "age_profile": row.age_profile,
+            "avatar": row.avatar,
+            "voice": row.voice,
+            "talk_mode": row.talk_mode,
+        }
+
+    @app.get("/api/settings")
+    def settings() -> dict[str, object]:
+        return {
+            "model": host.runtime.model,
+            "lan": host.lan_enabled,
+            "anthropic_api_key": "",
+            "keys_are_write_only": True,
+        }
+
+    @app.get("/api/export")
+    def export(learner_id: str = "") -> dict[str, str]:
+        learner_id = selected_id(learner_id)
+        return {"markdown": host.runtime.store.export_markdown(learner_id)}
+
+    @app.post("/api/memory/notes")
+    def add_note(body: dict[str, str], learner_id: str = "") -> dict[str, str]:
+        learner_id = selected_id(learner_id)
+        note_id = host.runtime.store.add_note(
+            learner_id, body.get("kind", "house"), body.get("text", ""), None
+        )
+        return {"id": note_id}
+
+    @app.post("/api/library/videos/{video_id}/unblock")
+    def unblock_video(video_id: str) -> dict[str, bool]:
+        host.runtime.store.unblock_video(video_id)
+        return {"ok": True}
+
+    @app.post("/api/library/channels/{channel_id}/unblock")
+    def unblock_channel(channel_id: str) -> dict[str, bool]:
+        host.runtime.store.unblock_channel(channel_id)
+        return {"ok": True}
+
+    @app.post("/api/library/images")
+    def add_image(body: dict[str, str]) -> dict[str, bool]:
+        image_id = body.get("id", "")
+        if not image_id or "/" in image_id or ".." in image_id:
+            return {"ok": False}
+        directory = host.data_dir or Path("images")
+        directory.mkdir(parents=True, exist_ok=True)
+        target = directory / f"{image_id}.svg"
+        target.write_text(body.get("svg", ""), encoding="utf-8")
+        host.runtime.store.add_image(
+            image_id, str(target), body.get("title", image_id), body.get("license", ""), body.get("tags", "")
+        )
+        return {"ok": True}
+
+    @app.post("/api/requests/{request_id}")
+    def update_request(request_id: str, body: dict[str, str]) -> dict[str, bool]:
+        host.runtime.store.set_request_status(request_id, body.get("status", "pending"))
+        return {"ok": True}
+
+    @app.post("/api/apps/{app_id}/enable")
+    def enable_app(app_id: str) -> dict[str, bool]:
+        disabled = host.runtime.store.get_setting("disabled_apps", [])
+        ids = set(disabled) if isinstance(disabled, list) else set()
+        ids.discard(app_id)
+        host.runtime.store.put_setting("disabled_apps", sorted(str(item) for item in ids))
+        return {"ok": True}
+
+    @app.put("/api/apps/{app_id}")
+    def app_cap(app_id: str, body: dict[str, object]) -> dict[str, bool]:
+        caps = host.runtime.store.get_setting("app_caps", {})
+        mapping = dict(caps) if isinstance(caps, dict) else {}
+        if "cap_minutes" in body:
+            mapping[app_id] = body["cap_minutes"]
+            host.runtime.store.put_setting("app_caps", mapping)
+        if body.get("enabled") is False:
+            disable_ids = host.runtime.store.get_setting("disabled_apps", [])
+            ids = set(disable_ids) if isinstance(disable_ids, list) else set()
+            ids.add(app_id)
+            host.runtime.store.put_setting("disabled_apps", sorted(str(item) for item in ids))
+        return {"ok": True}
+
+    @app.patch("/api/learner")
+    def update_learner(body: dict[str, object], learner_id: str = "") -> dict[str, bool]:
+        learner_id = selected_id(learner_id)
+        current = host.runtime.store.learner(learner_id)
+        if current is None:
+            return {"ok": False}
+        profile_id = str(body.get("age_profile", current.age_profile))
+        if profile_id not in host.runtime.age_profiles and profile_id != host.runtime.age_profile.id:
+            raise HTTPException(400, "Unknown age profile")
+        first_name = body.get("first_name", current.first_name)
+        birth_year = body.get("birth_year", current.birth_year)
+        host.runtime.store.upsert_learner(
+            learner_id=learner_id,
+            first_name=str(first_name),
+            birth_year=int(str(birth_year)),
+            age_profile=str(body.get("age_profile", current.age_profile)),
+            avatar=str(body.get("avatar", current.avatar)),
+            voice=str(body.get("voice", current.voice)),
+            talk_mode=str(body.get("talk_mode", current.talk_mode)),
+        )
+        return {"ok": True}
+
+    @app.put("/api/settings")
+    def update_settings(body: dict[str, object]) -> dict[str, object]:
+        if "lan" in body:
+            host.lan_enabled = bool(body["lan"])
+        if isinstance(body.get("model"), str):
+            host.runtime.model = str(body["model"])
+        if "break_suggestions" in body:
+            host.runtime.store.put_setting("break_suggestions", body["break_suggestions"])
+        if "spend_alert_cents" in body:
+            host.runtime.store.put_setting("spend_alert_cents", body["spend_alert_cents"])
+        updates: dict[str, str] = {}
+        for key, env_name in (
+            ("anthropic_api_key", "ANTHROPIC_API_KEY"),
+            ("youtube_api_key", "YOUTUBE_API_KEY"),
+        ):
+            value = body.get(key)
+            if isinstance(value, str) and value:
+                updates[env_name] = value
+        password = body.get("parent_password")
+        if isinstance(password, str) and password:
+            host.password_hash = hash_password(password)
+            updates["PARENT_PASSWORD_HASH"] = host.password_hash
+        if updates and host.secrets_path is not None:
+            upsert_secrets(host.secrets_path, updates)
+        return {"ok": True, "anthropic_api_key": "", "youtube_api_key": ""}
+
+    @app.post("/api/session/relock")
+    def relock() -> dict[str, bool]:
+        host.parent_locked = True
+        host.parent_seen_at = 0.0
+        return {"ok": True}
+
+    @app.post("/api/session/logout")
+    def logout() -> dict[str, str]:
+        host.parent_seen_at = 0.0
+        return {"action": "greeter"}
+
+    @app.post("/api/session/shutdown")
+    def shutdown() -> dict[str, str]:
+        host.runtime.store.put_setting("shutdown_requested", True, actor="parent")
+        return {"action": "shutdown"}
+
+    @app.post("/api/flags/{flag_id}/resolve")
+    def resolve_flag(flag_id: str) -> dict[str, bool]:
+        host.runtime.store.resolve_flag(flag_id)
+        return {"ok": True}
+
+    @app.get("/api/backup")
+    def backup() -> dict[str, object]:
+        if not host.backup_repository or host.data_dir is None:
+            return {"configured": False, "command": []}
+        command = restic_backup_command(host.backup_repository, [host.data_dir])
+        return {"configured": True, "command": command}
+
+    @app.post("/api/learner/delete")
+    def delete_learner(learner_id: str = "") -> dict[str, bool]:
+        learner_id = selected_id(learner_id)
+        host.runtime.store.delete_learner_data(learner_id)
+        if host.live and host.live.learner_id == learner_id:
+            host.live = None
+        return {"ok": True}
+
+    return app
+
+
+def _flags(host: Host, learner_id: str) -> list[Flag]:
+    with host.runtime.store.session() as db:
+        return list(db.scalars(select(Flag).join(SessionRow, Flag.session_id == SessionRow.id)
+                               .where(SessionRow.learner_id == learner_id)))
+
+
+def _sessions(host: Host, learner_id: str) -> list[SessionRow]:
+    with host.runtime.store.session() as db:
+        return list(db.scalars(select(SessionRow).where(SessionRow.learner_id == learner_id)
+                               .order_by(SessionRow.started_at)))
+
+
+def _outcome_payload(outcome: TurnOutcome) -> dict[str, object]:
+    return {
+        "sentences": outcome.sentences,
+        "tools": [record.name for record in outcome.tool_calls if record.allowed],
+        "flagged": outcome.flagged,
+    }
+
+
+def _ws_messages(outcome: TurnOutcome, turn_id: str) -> list[dict[str, object]]:
+    messages: list[dict[str, object]] = []
+    for record in outcome.tool_calls:
+        if not record.allowed:
+            continue
+        if record.name == "show_board":
+            elements = record.arguments.get("elements", [])
+            messages.append({"type": "board", "turn_id": turn_id, "elements": elements})
+        if record.name == "ask_choice":
+            messages.append(
+                {
+                    "type": "choices",
+                    "turn_id": turn_id,
+                    "prompt": record.arguments.get("prompt", ""),
+                    "options": record.arguments.get("options", []),
+                }
+            )
+        if record.name in {"play_video", "play_music", "play_album"} and "playing" in record.result:
+            messages.append(
+                {
+                    "type": "video",
+                    "action": "play",
+                    "video_id": record.result["playing"],
+                    "audio_only": bool(record.result.get("audio_only")),
+                    "start_s": record.arguments.get("start"),
+                    "end_s": record.arguments.get("end"),
+                    "at_s": None,
+                }
+            )
+    messages.append(
+        {
+            "type": "transcript",
+            "turn_id": turn_id,
+            "role": "tutor",
+            "text": " ".join(outcome.sentences),
+            "partial": False,
+        }
+    )
+    return messages

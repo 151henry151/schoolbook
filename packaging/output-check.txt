@@ -1,0 +1,6 @@
+# Words and patterns the tutor must not speak. One entry per line.
+# Prefix re: for a regular expression.
+password
+secret
+home address
+re:\b\d{1,5}\s+\w+\s+(street|st|road|rd|avenue|ave)\b

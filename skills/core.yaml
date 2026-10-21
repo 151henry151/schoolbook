@@ -1,0 +1,92 @@
+skills:
+  - id: math
+    title: Math
+    kid_description: Numbers, shapes, and patterns
+    age_min: 4
+    age_max: 8
+    children:
+      - id: math.counting
+        title: Counting
+        kid_description: Counting real things
+        age_min: 4
+        age_max: 7
+        children:
+          - id: math.counting.to20
+            title: Count to 20
+            kid_description: Count things up to 20
+            age_min: 4
+            age_max: 7
+      - id: math.addition
+        title: Addition
+        kid_description: Putting groups together
+        age_min: 5
+        age_max: 8
+        children:
+          - id: math.addition.within10
+            title: Add within 10
+            kid_description: Add numbers that stay under 10
+            age_min: 5
+            age_max: 8
+            prerequisites: [math.counting.to20]
+  - id: reading
+    title: Reading
+    kid_description: Letters and words
+    age_min: 4
+    age_max: 8
+    children:
+      - id: reading.phonics
+        title: Phonics
+        kid_description: How letters sound
+        age_min: 5
+        age_max: 7
+        children:
+          - id: reading.phonics.cvc_words
+            title: Short words
+            kid_description: Read words like cat and sun
+            age_min: 5
+            age_max: 7
+  - id: science
+    title: Science
+    kid_description: How the world works
+    age_min: 4
+    age_max: 8
+    children:
+      - id: science.living_things
+        title: Living things
+        kid_description: What plants and animals need
+        age_min: 4
+        age_max: 8
+        children:
+          - id: science.living_things.needs
+            title: What living things need
+            kid_description: Food, water, and a place to live
+            age_min: 4
+            age_max: 8
+  - id: cs
+    title: Computer science
+    kid_description: Steps and patterns
+    age_min: 5
+    age_max: 8
+    children:
+      - id: cs.sequencing
+        title: Sequencing
+        kid_description: Doing steps in order
+        age_min: 5
+        age_max: 8
+        children:
+          - id: cs.sequencing.instructions
+            title: Instructions
+            kid_description: Give steps someone else can follow
+            age_min: 5
+            age_max: 8
+  - id: philosophy
+    title: Philosophy
+    kid_description: Fairness and how we know
+    age_min: 5
+    age_max: 8
+    children:
+      - id: philosophy.fairness
+        title: Fairness
+        kid_description: What feels fair when people share
+        age_min: 5
+        age_max: 8

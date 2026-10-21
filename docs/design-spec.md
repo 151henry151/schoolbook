@@ -96,6 +96,8 @@ The kiosk side only displays, captures and launches; every call to Claude, speec
 
 ## 4. Kiosk session and lockdown
 
+The CF-30 dual-boot installation is an explicit exception to the single-purpose boot policy below: its graphical GRUB picker offers Schoolbook (Trixie) or Computer (Jessie/Skolelinux), waits indefinitely for arrow keys and Enter, and preserves access to the full desktop OS. See the README boot-picker section for installation and recovery.
+
 The machine boots, auto-logs into the `kid` account, and starts a compositor that can only show Schoolbook and the apps it launches. Lockdown is layered: the OS account has no privileges, the compositor has no escape keys, the browser has no navigation, and the firmware has no boot menu. No single layer has to be perfect.
 
 ### Accounts
@@ -174,7 +176,7 @@ Voice is a three-stage pipeline — speech-to-text, Claude, text-to-speech — b
 
 ### Offline and failure behaviour
 
-If the Claude API or STT is unreachable, the screen shows a friendly "the tutor is resting" message with the offline app shelf (GCompris and the other launchable apps). The daemon retries in the background and the tutor returns when the network does.
+If the Claude API or STT is unreachable, the screen shows a friendly "the tutor is resting" message with the offline app shelf (GCompris and the other launchable apps) and a Wi-Fi picker so a parent can join a guest network. The daemon retries in the background and the tutor returns when the network does.
 
 ## 6. Tutor agent
 

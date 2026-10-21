@@ -1,0 +1,7 @@
+[Unit]
+Description=Nightly Schoolbook restic backup
+
+[Service]
+Type=oneshot
+User=schoolbook
+ExecStart=/usr/bin/restic backup /var/lib/schoolbook

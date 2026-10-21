@@ -1,0 +1,7 @@
+# Additional learners are inserted once; existing parent edits are preserved.
+# Birth year is approximate; age-4 explicitly controls Hannah's teaching profile.
+- id: hannah
+  first_name: Hannah
+  birth_year: 2022
+  age_profile: age-4
+  avatar: star

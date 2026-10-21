@@ -1,0 +1,20 @@
+id: age-4
+age_years: 4
+max_sentences_per_turn: 2
+max_words_per_sentence: 8
+target_reading_grade: 0
+talk_mode_default: handsfree
+break_suggestions: gentle
+video_duration_minutes: [1, 8]
+video_stretch_steps: 0
+watch_along_pause_min_seconds: 120
+observer_frame_interval_s: 3
+language: en
+teaching_guidance: Use familiar objects, simple comparisons, and one small idea at a time. Assume no reading ability. Offer playful counting, letter sounds, colors, shapes, animals, and turn-taking. Give one spoken instruction and time to answer; never demand reading or fast typing. Explain scary topics gently without graphic detail.
+video_guidance: Choose calm, clear preschool videos for ages 3-5, with concrete examples and a gentle pace. Prefer short animal, nature, counting, letters, colors, and shapes explainers. Simple educational songs and animation are welcome. Avoid frightening scenes, advanced lectures, and content aimed at older children. Preserve the requested topic or channel when suitable.
+subject_weights:
+  reading: 3
+  math: 3
+  science: 2
+  world: 1
+  arts: 2

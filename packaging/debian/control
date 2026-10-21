@@ -1,0 +1,9 @@
+Package: schoolbook
+Section: education
+Priority: optional
+Maintainer: Schoolbook contributors <schoolbook@localhost>
+License: GPL-3.0-or-later
+Architecture: amd64
+Depends: python3 (>= 3.12), chromium, greetd, cage
+Description: Locked-down spoken tutor for one child
+ Schoolbook boots into a kiosk, talks with a child, and keeps a parent console.

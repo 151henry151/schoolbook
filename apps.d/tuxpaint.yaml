@@ -1,0 +1,5 @@
+id: tuxpaint
+name: Tux Paint
+exec: [tuxpaint, --fullscreen, --noprint]
+observe: true
+activities: []

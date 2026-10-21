@@ -1,0 +1,57 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# SPDX-FileCopyrightText: 2026 Schoolbook contributors
+ desktop-image: "background.png"
+ title-text: ""
+ message-font: "DejaVu Sans Regular 20"
+ message-color: "#183A46"
+ message-bg-color: "#F4F0E8"
+ terminal-box: "selected_*.png"
+ terminal-font: "DejaVu Sans Mono Regular 16"
++ label {
+  left = 10%
+  top = 12%
+  width = 80%
+  height = 60
+  text = "What would you like to do?"
+  font = "DejaVu Sans Bold 30"
+  color = "#183A46"
+  align = "center"
+}
++ boot_menu {
+  left = 18%
+  top = 28%
+  width = 64%
+  height = 360
+  item_font = "DejaVu Sans Bold 36"
+  item_color = "#183A46"
+  selected_item_color = "#FFFFFF"
+  icon_width = 64
+  icon_height = 64
+  item_height = 110
+  item_padding = 22
+  item_icon_space = 24
+  item_spacing = 64
+  item_pixmap_style = "option_*.png"
+  selected_item_pixmap_style = "selected_*.png"
+  scrollbar = false
+}
++ label {
+  left = 8%
+  top = 79%
+  width = 84%
+  height = 38
+  text = "Use the up / down arrows. Press Enter to start."
+  font = "DejaVu Sans Regular 20"
+  color = "#183A46"
+  align = "center"
+}
++ label {
+  left = 10%
+  top = 87%
+  width = 80%
+  height = 30
+  text = "Take your time. I will wait for you."
+  font = "DejaVu Sans Regular 20"
+  color = "#536873"
+  align = "center"
+}
